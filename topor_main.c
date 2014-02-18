@@ -225,7 +225,7 @@ channel_read(ev_io *w, int revents)
 		abort(); // FIXME
 	}
 
-	printf("channel read %zi bytes\n", r);
+	printf("channel %d read %zi bytes\n", chan->no, r);
 	struct client *client, *tmp;
 	LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
 		client_write(client, buf, r);
@@ -283,7 +283,7 @@ http_req(const char *url)
 		goto err;
 	}
 
-	snprintf(buf, sizeof(buf) - 1, "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n", purl->path, purl->host);
+	snprintf(buf, sizeof(buf) - 1, "GET /%s HTTP/1.1\r\nHost: %s\r\n\r\n", purl->path, purl->host);
 	if (send(fd, buf, strlen(buf), MSG_NOSIGNAL) != strlen(buf)) {
 		perror("send");
 		goto err;
@@ -382,6 +382,8 @@ int main(int argc, char* const argv[])
     }
 
 	if (channel_init(1, "http://clients.cdnet.tv/h/14/1/1/dWdJYnArck1BMU03a0FZaDd5OEtoeE5EUkpGdy9Ca3NUekh0SHdkblAzNGEydU9QZENZQzhuaVFadmx0UmR5eA") == NULL)
+		abort();
+	if (channel_init(2, "http://clients.cdnet.tv/h/4/1/1/cWdJYkZRYlJBMU9rc0oyRDdOT3A5UFB3ZGw3eUlLRHAyZXZtc2Z5RzIzVmx2NDJaOFk2RDRBeEJHM2hqN3lOZw") == NULL)
 		abort();
 
 	ev_io io;
