@@ -381,7 +381,7 @@ int main(int argc, char* const argv[])
 		abort();
     }
 
-	if (channel_init(3, "http://clients.cdnet.tv/h/14/1/1/R1FBQTVIZkIwVks0bWFXTE5aZW1pOEdvbmh1ZGlGbEVSTjZnZ0VVQVloYUZYdGZ6YXdCSEZyc01aMEc0b3Z1NQ") == NULL)
+	if (channel_init(1, "http://clients.cdnet.tv/h/14/1/1/dWdJYnArck1BMU03a0FZaDd5OEtoeE5EUkpGdy9Ca3NUekh0SHdkblAzNGEydU9QZENZQzhuaVFadmx0UmR5eA") == NULL)
 		abort();
 
 	ev_io io;
