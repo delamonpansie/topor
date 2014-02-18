@@ -231,30 +231,6 @@ channel_read(ev_io *w, int revents)
 		client_write(client, buf, r);
 }
 
-struct in_addr *
-hostname_to_ip(const char *hostname)
-{
-	struct hostent *he;
-	struct in_addr **addr_list;
-	int i;
-		
-	if ( (he = gethostbyname( hostname ) ) == NULL) 
-	{
-		// get the host info
-		perror("gethostbyname");
-		return NULL;
-	}
-
-	addr_list = (struct in_addr **) he->h_addr_list;
-	
-	for(i = 0; addr_list[i] != NULL; i++) 
-	{
-		return addr_list[i];
-	}
-	
-	return NULL;
-}
-
 int
 http_req(const char *url)
 {
@@ -283,8 +259,8 @@ http_req(const char *url)
 		return -1;
 	}
 
-	struct in_addr *hostip = hostname_to_ip(purl->host);
-	if (NULL == hostip) {
+	struct  hostent *hp = gethostbyname(purl->host);
+	if (NULL == hp) {
 		parsed_url_free(purl);
 		fprintf(stderr, "cant resolve host %s\n", purl->host);
 		return -1;
@@ -294,7 +270,7 @@ http_req(const char *url)
 	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(port);
-	sin.sin_addr.s_addr = hostip->s_addr;
+	bcopy ( hp->h_addr, &(sin.sin_addr.s_addr), hp->h_length);
 
 	int fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (fd < 0) {
