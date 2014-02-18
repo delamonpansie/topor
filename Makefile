@@ -2,8 +2,9 @@
 CFLAGS += -Iev -O0 -g3 -Wall
 
 obj += topor_ev.o
-obj += topor_main.o
 obj += topor_opt.o
+obj += url_parser.o
+obj += topor_main.o
 
 topor_ev.o: CFLAGS = -Iev -O2
 

@@ -1,9 +1,12 @@
 #define _GNU_SOURCE
 
+#include  <netdb.h>
+
 #include "topor.h"
 #include "topor_opt.h"
 #include "topor_ev.h"
 #include "queue.h"
+#include "url_parser.h"
 
 SLIST_HEAD(, channel) channels;
 struct prog_opt topor_opt;
@@ -38,42 +41,6 @@ sinsock(struct sockaddr_in *sin, struct prog_opt *topor_opt)
             return NULL;
     }
 	return sin;
-}
-
-int
-atosin(const char *orig, struct sockaddr_in *addr)
-{
-	int port;
-	char *str = strdupa(orig);
-	char *colon = strchr(str, ':');
-	addr->sin_family = AF_UNSPEC;
-
-	if (colon != NULL) {
-		*colon = 0;
-		port = atoi(colon + 1); /* port is next after ':' */
-	} else {
-		port = atoi(str);
-	}
-
-	if (port <= 0 || port >= 0xffff) {
-		fprintf(stderr, "bad port in addr: %s", orig);
-		return -1;
-	}
-
-	memset(addr, 0, sizeof(*addr));
-
-	if (colon == NULL || colon == str) { /* "33013" ":33013" */
-		addr->sin_addr.s_addr = INADDR_ANY;
-	} else {
-		if (inet_aton(str, &addr->sin_addr) == 0) {
-			perror("inet_aton");
-			return -1;
-		}
-	}
-
-	addr->sin_family = AF_INET;
-	addr->sin_port = htons(port);
-	return 0;
 }
 
 int
@@ -264,11 +231,70 @@ channel_read(ev_io *w, int revents)
 		client_write(client, buf, r);
 }
 
+struct in_addr *
+hostname_to_ip(const char *hostname)
+{
+	struct hostent *he;
+	struct in_addr **addr_list;
+	int i;
+		
+	if ( (he = gethostbyname( hostname ) ) == NULL) 
+	{
+		// get the host info
+		perror("gethostbyname");
+		return NULL;
+	}
+
+	addr_list = (struct in_addr **) he->h_addr_list;
+	
+	for(i = 0; addr_list[i] != NULL; i++) 
+	{
+		return addr_list[i];
+	}
+	
+	return NULL;
+}
+
 int
-http_req(const char *addr, const char *host, const char *url)
+http_req(const char *url)
 {
 	struct sockaddr_in sin;
 	char buf[1024] = {0};
+
+	struct parsed_url *purl = parse_url(url);
+	if (NULL == purl) {
+		fprintf(stderr, "bad url %s\n", url);
+		return -1;
+	}
+
+	if( strcmp("http", purl->scheme)) {
+		parsed_url_free(purl);
+		fprintf(stderr, "not http url %s\n", url);
+		return -1;
+	}
+
+	int port = 80;
+	if (NULL != purl->port)
+		port = atoi(purl->port);
+
+	if (port <= 0 || port >= 0xffff) {
+		parsed_url_free(purl);
+		fprintf(stderr, "bad port %d in url %s\n", port, url);
+		return -1;
+	}
+
+	struct in_addr *hostip = hostname_to_ip(purl->host);
+	if (NULL == hostip) {
+		parsed_url_free(purl);
+		fprintf(stderr, "cant resolve host %s\n", purl->host);
+		return -1;
+	}
+
+
+	memset(&sin, 0, sizeof(sin));
+	sin.sin_family = AF_INET;
+	sin.sin_port = htons(port);
+	sin.sin_addr.s_addr = hostip->s_addr;
 
 	int fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (fd < 0) {
@@ -276,15 +302,12 @@ http_req(const char *addr, const char *host, const char *url)
 		goto err;
 	}
 
-	if (atosin(addr, &sin) < 0)
-		goto err;
-
 	if (connect(fd, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
 		perror("connect");
 		goto err;
 	}
 
-	snprintf(buf, sizeof(buf) - 1, "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n", url, host);
+	snprintf(buf, sizeof(buf) - 1, "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n", purl->path, purl->host);
 	if (send(fd, buf, strlen(buf), MSG_NOSIGNAL) != strlen(buf)) {
 		perror("send");
 		goto err;
@@ -306,38 +329,30 @@ http_req(const char *addr, const char *host, const char *url)
 
 		printf("Redirect: %s\n", location);
 
-		char *red_addr = NULL, *red_url = NULL;
-		if (sscanf(location, "Location: http://%a[^/]%as", &red_addr, &red_url) != 2)
+		char *red_addr = NULL;
+		if (sscanf(location, "Location: %as", &red_addr) != 1)
 			goto err;
 		close(fd);
-		fd = http_req(red_addr, red_addr, red_url);
+		fd = http_req(red_addr);
 		free(red_addr);
-		free(red_url);
 	}
 
+	parsed_url_free(purl);
 	return fd;
 err:
+	parsed_url_free(purl);
 	close(fd);
 	return -1;
 }
 
 struct channel *
-channel_init(int cno, const char *addr, const char *host, const char *url)
+channel_init(int cno, const char *url)
 {
 	struct channel *chan = calloc(sizeof(*chan), 1);
 	chan->no = cno;
 
 
-#if 0
-	// FIXME: nonblocking connect & write
-	int optval = 1;
-	if (ioctl(fd, FIONBIO, &optval) < 0) {
-		perror("ioctl");
-		goto err;
-	}
-#endif
-
-	int fd = http_req(addr, host, url);
+	int fd = http_req(url);
 	if (fd < 0)
 		goto err;
 
@@ -390,7 +405,7 @@ int main(int argc, char* const argv[])
 		abort();
     }
 
-	if (channel_init(3, "88.150.198.108:80", "clients.cdnet.tv", "/h/14/1/1/R1FBQTVIZkIwVks0bWFXTE5aZW1pOEdvbmh1ZGlGbEVSTjZnZ0VVQVloYUZYdGZ6YXdCSEZyc01aMEc0b3Z1NQ") == NULL)
+	if (channel_init(3, "http://clients.cdnet.tv/h/14/1/1/R1FBQTVIZkIwVks0bWFXTE5aZW1pOEdvbmh1ZGlGbEVSTjZnZ0VVQVloYUZYdGZ6YXdCSEZyc01aMEc0b3Z1NQ") == NULL)
 		abort();
 
 	ev_io io;
