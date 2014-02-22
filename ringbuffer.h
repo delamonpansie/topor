@@ -18,5 +18,7 @@ size_t     rb_can_read(RingBuffer *rb);
 
 size_t     rb_read(RingBuffer *rb, void *data, size_t count);
 size_t     rb_write(RingBuffer *rb, const void *data, size_t count);
+size_t     rb_writesize(RingBuffer *rb, size_t count);
+void*      rb_writepointer(RingBuffer *rb);
 
 #endif

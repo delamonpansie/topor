@@ -3,14 +3,11 @@
 #include  <netdb.h>
 
 #include "topor.h"
-#include "topor_opt.h"
-#include "topor_ev.h"
 #include "queue.h"
+#include "topor_ev.h"
+#include "topor_opt.h"
 #include "url_parser.h"
 #include "ringbuffer.h"
-
-SLIST_HEAD(, channel) channels;
-struct prog_opt topor_opt;
 
 struct channel {
 	ev_io io;
@@ -28,6 +25,9 @@ struct client {
 	char rbuf[256];
 	int rbytes, rcapa;
 };
+
+SLIST_HEAD(, channel) channels;
+struct prog_opt topor_opt;
 
 struct sockaddr_in *
 sinsock(struct sockaddr_in *sin, struct prog_opt *topor_opt)
@@ -231,15 +231,16 @@ void
 channel_read(ev_io *w, int revents)
 {
 	struct channel *chan = (struct channel *)w;
-	static char buf[16384];
+	char *buf = rb_writepointer(chan->rb);
+	size_t buflen = rb_writesize(chan->rb, 16384);
 
-	ssize_t r = recv(w->fd, buf, sizeof(buf), 0);
+	ssize_t r = recv(w->fd, buf, buflen, 0);
 	if (r < 0) {
 		perror("recv");
 		abort(); // FIXME
 	}
 	
-	rb_write(chan->rb, buf, r);
+	rb_write(chan->rb, NULL, r);
 //	printf("channel %d read %zi bytes\n", chan->no, r);
 	struct client *client, *tmp;
 	LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
@@ -357,6 +358,12 @@ channel_init(int cno, const char *url)
 err:
 	free(chan);
 	return NULL;
+}
+
+void
+channel_close(struct channel *chan)
+{
+	rb_free(chan->rb);
 }
 
 int main(int argc, char* const argv[])

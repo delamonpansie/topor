@@ -69,27 +69,46 @@ size_t
 rb_write(RingBuffer *rb, const void *data, size_t count)
 {
 	assert(rb != NULL);
-	assert(data != NULL);
 
 	if (count > rb->rb_capacity) return -1;
 
 	int tail_avail_sz = rb->rb_capacity - (rb->rb_tail - rb->rb_buff);
 
 	if (count <= tail_avail_sz) {
-		memcpy(rb->rb_tail, data, count);
+		if(data)
+			memcpy(rb->rb_tail, data, count);
 		rb->rb_tail += count;
 		if (rb->rb_tail == rb->rb_buff+rb->rb_capacity)
 			rb->rb_tail = rb->rb_buff;
 	}
 	else {
-		memcpy(rb->rb_tail, data, tail_avail_sz);
+		if(data)
+			memcpy(rb->rb_tail, data, tail_avail_sz);
 		rb->rb_tail = rb->rb_buff;
-		memcpy(rb->rb_tail, (char*)data+tail_avail_sz, count-tail_avail_sz);
+		if(data)
+			memcpy(rb->rb_tail, (char*)data+tail_avail_sz, count-tail_avail_sz);
 		rb->rb_tail += count-tail_avail_sz;
 	}
 	rb->rb_size += count;
 	if(rb->rb_size > rb->rb_capacity)
 		rb->rb_size = rb->rb_capacity;
 	return count;
+}
+
+size_t
+rb_writesize(RingBuffer *rb, size_t count)
+{
+	assert(rb != NULL);
+
+	if (count > rb->rb_capacity) return -1;
+
+	return rb->rb_capacity - (rb->rb_tail - rb->rb_buff);
+}
+
+void *
+rb_writepointer(RingBuffer *rb)
+{
+	assert(rb != NULL);
+	return rb->rb_tail;
 }
 
