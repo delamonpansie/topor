@@ -7,6 +7,7 @@
 #include "topor_ev.h"
 #include "queue.h"
 #include "url_parser.h"
+#include "ringbuffer.h"
 
 SLIST_HEAD(, channel) channels;
 struct prog_opt topor_opt;
@@ -16,7 +17,8 @@ struct channel {
 	LIST_HEAD(, client) clients;
 	SLIST_ENTRY(channel) link;
 	int no;
-	char *addr, *url;
+	RingBuffer *rb;
+	size_t rbsize;
 };
 
 struct client {
@@ -50,6 +52,7 @@ server_socket(struct sockaddr_in *sin)
 	int one = 1;
 	struct linger ling = { 0, 0 };
 	int nonblock = 1;
+	int sndbufsize = 1024*1024;
 
 	if ((fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
 		perror("socket");
@@ -61,6 +64,12 @@ server_socket(struct sockaddr_in *sin)
 	    setsockopt(fd, SOL_SOCKET, SO_LINGER, &ling, sizeof(ling)) == -1)
 	{
 		perror("setsockopt");
+		close(fd);
+		return -1;
+	}
+
+	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbufsize, sizeof(sndbufsize)) == -1) {
+		perror("so_sndbuf");
 		close(fd);
 		return -1;
 	}
@@ -138,14 +147,14 @@ client_write(struct client *c, const char *buf, size_t len)
 	for (;;) {
 		ssize_t r = send(c->io.fd, buf, len, MSG_NOSIGNAL);
 		if (r < 0) {
-			if (errno == EINTR)
+			if (errno == EINTR || errno == EAGAIN)
 				continue;
 
 			perror("send");
 			client_close(c);
 			return -1;
 		}
-		printf("client write %zi bytes\n", r);
+//		printf("client write %zi bytes\n", r);
 		return 0;
 	}
 }
@@ -202,6 +211,11 @@ client_read(ev_io *w, int revents)
 			struct channel *chan;
 			SLIST_FOREACH(chan, &channels, link) {
 				if (chan->no == cno) {
+					void *sbuf = malloc(chan->rbsize);
+					if(sbuf) {
+						rb_read(chan->rb, sbuf, chan->rbsize);
+						client_write(c, sbuf, chan->rbsize);
+					}
 					LIST_INSERT_HEAD(&chan->clients, c, link);
 					return;
 				}
@@ -224,8 +238,9 @@ channel_read(ev_io *w, int revents)
 		perror("recv");
 		abort(); // FIXME
 	}
-
-	printf("channel %d read %zi bytes\n", chan->no, r);
+	
+	rb_write(chan->rb, buf, r);
+//	printf("channel %d read %zi bytes\n", chan->no, r);
 	struct client *client, *tmp;
 	LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
 		client_write(client, buf, r);
@@ -331,16 +346,15 @@ channel_init(int cno, const char *url)
 	int fd = http_req(url);
 	if (fd < 0)
 		goto err;
-
-
+	
+	chan->rbsize = 512*1024;
+	chan->rb = rb_new(chan->rbsize);	
 	ev_io_init(&chan->io, channel_read, fd, EV_READ);
 	ev_io_start(&chan->io);
 
 	SLIST_INSERT_HEAD(&channels, chan, link);
 	return chan;
 err:
-	free(chan->addr);
-	free(chan->url);
 	free(chan);
 	return NULL;
 }
@@ -383,9 +397,10 @@ int main(int argc, char* const argv[])
 
 	if (channel_init(1, "http://clients.cdnet.tv/h/14/1/1/dWdJYnArck1BMU03a0FZaDd5OEtoeE5EUkpGdy9Ca3NUekh0SHdkblAzNGEydU9QZENZQzhuaVFadmx0UmR5eA") == NULL)
 		abort();
+/*
 	if (channel_init(2, "http://clients.cdnet.tv/h/4/1/1/cWdJYkZRYlJBMU9rc0oyRDdOT3A5UFB3ZGw3eUlLRHAyZXZtc2Z5RzIzVmx2NDJaOFk2RDRBeEJHM2hqN3lOZw") == NULL)
 		abort();
-
+*/
 	ev_io io;
 	ev_io_init(&io, server_accept, fd, EV_READ);
 	ev_io_start(&io);
