@@ -6,24 +6,26 @@
 #include "queue.h"
 #include "topor_ev.h"
 #include "topor_opt.h"
+#include "topor_config.h"
 #include "url_parser.h"
 #include "ringbuffer.h"
 
 struct channel {
 	ev_io io;
-	LIST_HEAD(, client) clients;
-	SLIST_ENTRY(channel) link;
 	int no;
+	char *url;
 	RingBuffer *rb;
 	size_t rbsize;
+	LIST_HEAD(, client) clients;
+	SLIST_ENTRY(channel) link;
 };
 
 struct client {
 	ev_io io;
 	struct channel *channel;
-	LIST_ENTRY(client) link;
 	char rbuf[256];
 	int rbytes, rcapa;
+	LIST_ENTRY(client) link;
 };
 
 SLIST_HEAD(, channel) channels;
@@ -35,13 +37,13 @@ sinsock(struct sockaddr_in *sin, struct prog_opt *topor_opt)
 	memset(sin, 0, sizeof(struct sockaddr_in));
 	sin->sin_family = AF_INET;
 	sin->sin_port = htons(topor_opt->listen_port);
-    if( 0 == topor_opt->listen_addr[0] ) {
-        sin->sin_addr.s_addr = INADDR_ANY;
-    }
-    else {
-        if( 0 == inet_aton(topor_opt->listen_addr, &sin->sin_addr) )
-            return NULL;
-    }
+	if( 0 == topor_opt->listen_addr[0] ) {
+		sin->sin_addr.s_addr = INADDR_ANY;
+	}
+	else {
+		if( 0 == inet_aton(topor_opt->listen_addr, &sin->sin_addr) )
+			return NULL;
+	}
 	return sin;
 }
 
@@ -60,8 +62,8 @@ server_socket(struct sockaddr_in *sin)
 	}
 
 	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) == -1 ||
-	    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one)) == -1 ||
-	    setsockopt(fd, SOL_SOCKET, SO_LINGER, &ling, sizeof(ling)) == -1)
+			setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one)) == -1 ||
+			setsockopt(fd, SOL_SOCKET, SO_LINGER, &ling, sizeof(ling)) == -1)
 	{
 		perror("setsockopt");
 		close(fd);
@@ -154,7 +156,7 @@ client_write(struct client *c, const char *buf, size_t len)
 			client_close(c);
 			return -1;
 		}
-//		printf("client write %zi bytes\n", r);
+		//		printf("client write %zi bytes\n", r);
 		return 0;
 	}
 }
@@ -239,9 +241,9 @@ channel_read(ev_io *w, int revents)
 		perror("recv");
 		abort(); // FIXME
 	}
-	
+
 	rb_write(chan->rb, NULL, r);
-//	printf("channel %d read %zi bytes\n", chan->no, r);
+	//	printf("channel %d read %zi bytes\n", chan->no, r);
 	struct client *client, *tmp;
 	LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
 		client_write(client, buf, r);
@@ -338,17 +340,18 @@ err:
 }
 
 struct channel *
-channel_init(int cno, const char *url)
+channel_init(int cno, const char *url, size_t bufsize)
 {
 	struct channel *chan = calloc(sizeof(*chan), 1);
 	chan->no = cno;
-
+	chan->url = strdup(url);
 
 	int fd = http_req(url);
 	if (fd < 0)
 		goto err;
-	
+
 	chan->rbsize = 512*1024;
+	if(bufsize) chan->rbsize = bufsize * 1024;
 	chan->rb = rb_new(chan->rbsize);	
 	ev_io_init(&chan->io, channel_read, fd, EV_READ);
 	ev_io_start(&chan->io);
@@ -364,11 +367,13 @@ void
 channel_close(struct channel *chan)
 {
 	rb_free(chan->rb);
+	free(chan->url);
 }
 
 int main(int argc, char* const argv[])
 {
-    int rc;
+	char buf[1025];
+	int rc;
 	struct sockaddr_in sin, *ssin;
 
 	ev_default_loop(ev_recommended_backends() | EVFLAG_SIGNALFD);
@@ -383,31 +388,55 @@ int main(int argc, char* const argv[])
 		default:                    evb = "unknown";
 	}
 	printf("ev_loop initialized using '%s' backend, libev version is %d.%d\n",
-	       evb, ev_version_major(), ev_version_minor());
+			evb, ev_version_major(), ev_version_minor());
 
-    rc = get_opt(argc, argv, &topor_opt);
-    if (rc) {
-        free_opt( &topor_opt );
-        return rc;
-    }
+	rc = get_opt(argc, argv, &topor_opt);
+	if (rc) {
+		free_opt( &topor_opt );
+		return rc;
+	}
 
-    ssin = sinsock(&sin, &topor_opt);
-    if(NULL == ssin) {
-        perror("Bad listen");
-        abort();
-    }
+	ssin = sinsock(&sin, &topor_opt);
+	if(NULL == ssin) {
+		perror("Bad listen");
+		abort();
+	}
 	int fd = server_socket(ssin);
 	if (fd < 0) {
-        perror("Cannot bind");
+		perror("Cannot bind");
 		abort();
-    }
+	}
 
-	if (channel_init(1, "http://clients.cdnet.tv/h/14/1/1/dWdJYnArck1BMU03a0FZaDd5OEtoeE5EUkpGdy9Ca3NUekh0SHdkblAzNGEydU9QZENZQzhuaVFadmx0UmR5eA") == NULL)
+	const char *config = CONFIG_NAME;
+	if(topor_opt.configfile) config = topor_opt.configfile;
+	FILE *cf = fopen(config, "r");
+	if(cf) {
+		int r, i=0, cno=0;
+		size_t bufsize;
+		char *churl;
+		while(!feof(cf)) {
+			fgets(buf, sizeof(buf)-1, cf);
+			++i;
+			bufsize = 0;
+			r = parseline(buf, &cno, &churl, &bufsize);
+			if(0 == r) continue;
+			if(1 == r) {
+				fprintf(stderr,"No channel url on line %d\n",i);
+				continue;
+			}
+			if(channel_init(cno, churl, bufsize) == NULL) abort(); //FIXME
+		}
+		fclose(cf);
+	}
+	else {
+		fprintf(stderr,"Can't read file '%s'! %s\n", config, strerror(errno));
+	}
+	
+	if(SLIST_EMPTY(&channels)) {
+		fprintf(stderr,"No channels to relay!\n");
 		abort();
-/*
-	if (channel_init(2, "http://clients.cdnet.tv/h/4/1/1/cWdJYkZRYlJBMU9rc0oyRDdOT3A5UFB3ZGw3eUlLRHAyZXZtc2Z5RzIzVmx2NDJaOFk2RDRBeEJHM2hqN3lOZw") == NULL)
-		abort();
-*/
+	}
+
 	ev_io io;
 	ev_io_init(&io, server_accept, fd, EV_READ);
 	ev_io_start(&io);

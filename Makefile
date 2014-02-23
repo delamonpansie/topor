@@ -5,6 +5,7 @@ obj += topor_ev.o
 obj += topor_opt.o
 obj += url_parser.o
 obj += ringbuffer.o
+obj += topor_config.o
 obj += topor_main.o
 
 topor_ev.o: CFLAGS = -Iev -O2

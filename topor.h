@@ -1,5 +1,5 @@
-#ifndef STRM_H
-#define STRM_H
+#ifndef TOPOR_H
+#define TOPOR_H
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +26,8 @@ static const int ERR_INTERNAL   =  3;    /* internal error */
 #define PORT_STR_SIZE   6
 
 static const int	ETHERNET_MTU	= 1500;
-static const char	IPv4_ALL[]		= "0.0.0.0";
+static const char	IPv4_ALL[]	= "0.0.0.0";
+static const char	CONFIG_NAME[]	= "topor.cfg";
 
 typedef u_short flag_t;
 #if !defined( f_TRUE ) && !defined( f_FALSE )

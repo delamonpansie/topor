@@ -33,6 +33,8 @@ init_opt( struct prog_opt* so )
 	so->is_verbose = 0;
 	so->listen_addr[0] = 0;
 	so->listen_port = 8888;
+	so->logfile = NULL;
+	so->configfile = NULL;
     return rc;
 }
 
@@ -43,6 +45,8 @@ free_opt( struct prog_opt* so )
     assert( so );
     if( so->logfile ) 
         free(so->logfile);
+    if( so->configfile ) 
+        free(so->configfile);
 }
 
 /*
@@ -63,13 +67,15 @@ void
 usage( const char* app, FILE* fp )
 {
     (void) fprintf (fp, "usage: %s [-vf] [-b listenaddr] [-p port] "
-            "[-l logfile]\n"
+            "[-l logfile] [-c configfile]\n"
             , app );
     (void) fprintf(fp,
             "\t-v : enable verbose output [default = disabled]\n"
             "\t-f : do NOT run as a daemon [default = daemon if root]\n"
             "\t-b : (IPv4) address to listen on [default = %s]\n"
             "\t-p : port to listen on\n"
+            "\t-l : log file name\n"
+            "\t-c : config file name\n"
             ,IPv4_ALL);
     (void) fprintf( fp, "Examples:\n"
             "  %s -p 4022 \n"
@@ -84,7 +90,7 @@ int
 get_opt(int argc, char* const argv[], struct prog_opt *topor_opt)
 {
     int rc = 0, ch = 0;
-	static const char OPTMASK[] = "fvb:l:p:";
+	static const char OPTMASK[] = "fvb:l:p:c:";
 
     rc = init_opt( topor_opt );
     while( (0 == rc) && (-1 != (ch = getopt(argc, argv, OPTMASK))) ) {
@@ -113,6 +119,10 @@ get_opt(int argc, char* const argv[], struct prog_opt *topor_opt)
 
             case 'l':
                       topor_opt->logfile = strdup(optarg);
+                      break;
+
+            case 'c':
+                      topor_opt->configfile = strdup(optarg);
                       break;
 
             case ':':

@@ -10,10 +10,11 @@ static const ssize_t SOCKBUF_LEN = (1024 * 1024);
 /* options */
 struct prog_opt {
 	flag_t		is_foreground;
-    flag_t		is_verbose;
-    char		listen_addr[IPADDR_STR_SIZE];
-    int			listen_port;
-    char*		logfile;
+	flag_t		is_verbose;
+	char		listen_addr[IPADDR_STR_SIZE];
+	int		listen_port;
+	char*		logfile;
+	char*		configfile;
 };
 
 #ifdef __cplusplus
