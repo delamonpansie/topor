@@ -39,6 +39,22 @@ rb_can_read(RingBuffer *rb)
 	return rb->rb_size;
 }
 
+char *
+rb_head(RingBuffer *rb)
+{
+	assert(rb != NULL);
+	return rb->rb_buff;
+}
+
+void
+rb_reset(RingBuffer *rb)
+{
+	assert(rb != NULL);
+	rb->rb_buff = (char*)rb + sizeof(RingBuffer);
+	rb->rb_tail = rb->rb_buff;
+	rb->rb_size = 0;
+}
+
 size_t
 rb_read(RingBuffer *rb, void *data, size_t count)
 {
