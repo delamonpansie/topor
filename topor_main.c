@@ -166,7 +166,6 @@ client_write(struct client *c, const char *buf, size_t len)
 			client_close(c);
 			return -1;
 		}
-		//		printf("client write %zi bytes\n", r);
 		return 0;
 	}
 }
@@ -176,9 +175,8 @@ client_parse_get(struct client *c)
 {
 	int ret = -1;
 	char *url;
-	if (sscanf(c->rbuf, "GET %as HTTP/1.1", &url) != 1) {
+	if (sscanf(c->rbuf, "GET %as HTTP/1.1", &url) != 1)
 		return -1;
-	}
 
 	char *p = strrchr(url, '/');
 	if (p)
