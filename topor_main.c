@@ -428,7 +428,10 @@ err:
 				perror("send");
 				return;
 			}
-			chan->state = CH_SENDREQ;	
+			ev_io_stop(&chan->io);
+			ev_io_init(&chan->io, channel_cb, w->fd, EV_READ);
+			ev_io_start(&chan->io);
+			chan->state = CH_SENDREQ;
 			parsed_url_free(purl);
 		}
 	}
