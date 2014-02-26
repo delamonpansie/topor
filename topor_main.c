@@ -222,9 +222,12 @@ client_read(ev_io *w, int revents)
 			SLIST_FOREACH(chan, &channels, link) {
 				if (chan->no == cno) {
 					void *sbuf = malloc(chan->rbsize);
-					if(sbuf) {
+					if (sbuf) {
 						rb_read(chan->rb, sbuf, chan->rbsize);
-						client_write(c, sbuf, chan->rbsize);
+						int r = client_write(c, sbuf, chan->rbsize);
+						free(sbuf);
+						if (r < 0)
+							return;
 					}
 					LIST_INSERT_HEAD(&chan->clients, c, link);
 					return;
