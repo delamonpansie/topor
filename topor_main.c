@@ -26,6 +26,8 @@ struct channel {
 	chanstate state;
 	RingBuffer *rb;
 	size_t rbsize;
+	time_t lastclient;
+	time_t lastdata;
 	LIST_HEAD(, client) clients;
 	SLIST_ENTRY(channel) link;
 };
@@ -40,6 +42,9 @@ struct client {
 
 SLIST_HEAD(, channel) channels;
 struct prog_opt topor_opt;
+
+void
+channel_connect(struct channel *chan);
 
 struct sockaddr_in *
 sinsock(struct sockaddr_in *sin, struct prog_opt *topor_opt)
@@ -162,7 +167,7 @@ client_write(struct client *c, const char *buf, size_t len)
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
 
-			perror("send");
+			perror("client send");
 			client_close(c);
 			return -1;
 		}
@@ -221,16 +226,27 @@ client_read(ev_io *w, int revents)
 			struct channel *chan;
 			SLIST_FOREACH(chan, &channels, link) {
 				if (chan->no == cno) {
-					void *sbuf = malloc(chan->rbsize);
-					if (sbuf) {
-						rb_read(chan->rb, sbuf, chan->rbsize);
-						int r = client_write(c, sbuf, chan->rbsize);
-						free(sbuf);
-						if (r < 0)
-							return;
+					if(chan->state == CH_READ) {
+						void *sbuf = malloc(chan->rbsize);
+						if (sbuf) {
+							rb_read(chan->rb, sbuf, chan->rbsize);
+							int r = client_write(c, sbuf, chan->rbsize);
+							free(sbuf);
+							if (r < 0)
+								return;
+						}
+						LIST_INSERT_HEAD(&chan->clients, c, link);
+						return;
 					}
-					LIST_INSERT_HEAD(&chan->clients, c, link);
-					return;
+					else if(chan->state == CH_STOP) {
+						channel_connect(chan);
+						LIST_INSERT_HEAD(&chan->clients, c, link);
+						return;
+					}
+					else {
+						LIST_INSERT_HEAD(&chan->clients, c, link);
+						return;
+					}
 				}
 			}
 		}
@@ -310,9 +326,11 @@ err:
 void
 channel_close(struct channel *chan)
 {
+	ev_io_stop(&chan->io);
 	rb_free(chan->rb);
-	free(chan->url);
 	if (chan->realurl) free(chan->realurl);
+	chan->realurl = NULL;
+	chan->rb = NULL;
 	chan->state = CH_STOP;
 	fprintf(stderr, "close channel %d\n", chan->no);
 }
@@ -331,7 +349,7 @@ channel_cb(ev_io *w, int revents)
 		size_t buflen = rb_writesize(chan->rb, 16384);
 
 		ssize_t r = recv(w->fd, buf, buflen, 0);
-		printf("channel %d read %zi bytes\n", chan->no, r);
+//		printf("channel %d read %zi bytes\n", chan->no, r);
 
 		if (r < 0) {
 			perror("recv");
@@ -347,6 +365,7 @@ channel_cb(ev_io *w, int revents)
 			channel_close(chan);
 			return;
 		}
+		chan->lastdata = time(NULL);
 
 		/* shift pointer in ring buffer by r */
 		rb_write(chan->rb, NULL, r);
@@ -412,10 +431,14 @@ err:
 			}
 			rb_reset(chan->rb);
 			chan->state = CH_READ;
+			chan->lastdata = chan->lastclient = time(NULL);
+			fprintf(stderr,"connect channel %d\n", chan->no);
 		}
-
-		LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
-			client_write(client, buf, r);
+		if( ! LIST_EMPTY(&chan->clients) ) {
+			chan->lastclient = time(NULL);
+			LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
+				client_write(client, buf, r);
+		}
 	}
 	else if (revents & EV_WRITE) {
 		if(chan->state == CH_CONNECT) {
@@ -426,7 +449,7 @@ err:
 		       		purl = parse_url(chan->url);
 			snprintf(buf, sizeof(buf) - 1, "GET /%s HTTP/1.1\r\nHost: %s\r\n\r\n", purl->path, purl->host);
 			if (send(w->fd, buf, strlen(buf), MSG_NOSIGNAL) != strlen(buf)) {
-				perror("send");
+				perror("server send");
 				return;
 			}
 			ev_io_stop(&chan->io);
@@ -438,6 +461,21 @@ err:
 	}
 }
 
+void
+channel_connect(struct channel *chan)
+{
+	int fd = http_sock(chan->url);
+	if (fd < 0)
+		return;
+	chan->rb = rb_new(chan->rbsize);	
+	chan->state = CH_CONNECT;
+
+	ev_io_init(&chan->io, channel_cb, fd, EV_READ | EV_WRITE);
+	ev_io_start(&chan->io);
+
+	return;
+}
+
 struct channel *
 channel_init(int cno, const char *url, size_t bufsize)
 {
@@ -445,25 +483,26 @@ channel_init(int cno, const char *url, size_t bufsize)
 	chan->no = cno;
 	chan->url = strdup(url);
 	chan->realurl = NULL;
-
-	int fd = http_sock(url);
-	if (fd < 0)
-		goto err;
-
 	chan->rbsize = 512*1024;
 	if(bufsize) chan->rbsize = bufsize * 1024;
-	chan->rb = rb_new(chan->rbsize);	
-	chan->state = CH_CONNECT;
-
-	ev_io_init(&chan->io, channel_cb, fd, EV_READ | EV_WRITE);
-	ev_io_start(&chan->io);
-
+	chan->state = CH_STOP;
 	SLIST_INSERT_HEAD(&channels, chan, link);
 	return chan;
-err:
-	free(chan);
-	chan->state = CH_STOP;
-	return NULL;
+}
+
+void
+timer_cb(struct ev_timer *w, int revents)
+{
+	time_t t = time(NULL);
+	struct channel *chan;
+	SLIST_FOREACH(chan, &channels, link) {
+		if (chan->state == CH_READ) {
+			if (t - chan->lastdata > 10 || t - chan->lastclient > 10) {
+				close(chan->io.fd);
+				channel_close(chan);
+			}
+		}
+	}
 }
 
 int main(int argc, char* const argv[])
@@ -536,6 +575,10 @@ int main(int argc, char* const argv[])
 	ev_io io;
 	ev_io_init(&io, server_accept, fd, EV_READ);
 	ev_io_start(&io);
+
+	ev_timer sectimer;
+	ev_timer_init(&sectimer, timer_cb, 1., 1.);
+	ev_timer_again(&sectimer);
 
 	ev_run(0);
 	return 0;

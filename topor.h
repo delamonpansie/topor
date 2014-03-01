@@ -13,6 +13,7 @@
 #include <netinet/tcp.h>
 #include <errno.h>
 #include <sys/types.h>
+#include <time.h>
 
 /* application error codes */
 static const int ERR_PARAM      =  1;    /* invalid parameter(s) */

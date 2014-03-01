@@ -5,8 +5,7 @@
 static __inline__ int
 is_space(char c)
 {
-	if(c == ' ') return 1;
-	if(c == '\t') return 1;
+	if(c == ' ' || c == '\t' || c == '\n' || c == '\r') return 1;
 	return 0;
 }
 
@@ -34,7 +33,7 @@ int
 parseline(char *p, int *cno, char **url, size_t *bufsize)
 {
 	p = skipspaces(p);
-	if(*p == '\0' || *p == '\n' || *p == '#') return 0;
+	if(*p == '\0' || *p =='\r' || *p == '\n' || *p == '#') return 0;
 	*cno = atoi(p);
 	p = skipsymbols(p);
 	p = skipspaces(p);
@@ -43,8 +42,9 @@ parseline(char *p, int *cno, char **url, size_t *bufsize)
 	p = skipsymbols(p);
 	*url = op;
 	if(*p == '\0') return 2;
-	*p = '\0';
+	op = p;
 	p = skipspaces(p);
+	*op = '\0';
 	if(*p == '\0') return 2;
 	*bufsize = atoi(p);
 	return 3;
