@@ -1,11 +1,22 @@
-#ifndef STRM_OPT_H
-#define STRM_OPT_H
+#ifndef TOPOR_OPT_H
+#define TOPOR_OPT_H
 
 #include "topor.h"
+#include "util.h"
+
+/* max size of string with IPv4 address */
+#define IPADDR_STR_SIZE 16
+
+typedef u_short flag_t;
+#if !defined( f_TRUE ) && !defined( f_FALSE )
+    #define     f_TRUE  ((flag_t)1)
+    #define     f_FALSE ((flag_t)0)
+#else
+    #error f_TRUE or f_FALSE already defined
+#endif
 
 
 static const ssize_t SOCKBUF_LEN = (1024 * 1024);
-
 
 /* options */
 struct prog_opt {
@@ -15,6 +26,7 @@ struct prog_opt {
 	int		listen_port;
 	char*		logfile;
 	char*		configfile;
+	loglevel	loglevel;
 };
 
 #ifdef __cplusplus

@@ -35,6 +35,7 @@ init_opt( struct prog_opt* so )
 	so->listen_port = 8888;
 	so->logfile = NULL;
 	so->configfile = NULL;
+	so->loglevel = L_ANNOY;
     return rc;
 }
 
@@ -48,20 +49,6 @@ free_opt( struct prog_opt* so )
     if( so->configfile ) 
         free(so->configfile);
 }
-
-/*
-static void
-init_app_info()
-{
-    if ('\0' == g_udpxy_finfo[0]) {
-        (void) snprintf( g_udpxy_finfo, sizeof(g_udpxy_finfo),
-                "%s %s-%d.%d (%s) %s [%s]", g_udpxy_app, VERSION,
-                BUILDNUM, PATCH, BUILD_TYPE,
-            COMPILE_MODE, get_sysinfo(NULL) );
-    }
-}
-*/
-
 
 void
 usage( const char* app, FILE* fp )

@@ -2,6 +2,8 @@
 CFLAGS += -Iev -O0 -g3 -Wall
 
 obj += topor_ev.o
+obj += util.o
+obj += global.o
 obj += topor_opt.o
 obj += url_parser.o
 obj += ringbuffer.o

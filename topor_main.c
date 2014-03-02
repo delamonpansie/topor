@@ -3,45 +3,11 @@
 #include  <netdb.h>
 
 #include "topor.h"
-#include "queue.h"
-#include "topor_ev.h"
-#include "topor_opt.h"
-#include "topor_config.h"
 #include "url_parser.h"
-#include "ringbuffer.h"
 
-typedef enum {
-	CH_STOP,
-	CH_CONNECT,
-	CH_SENDREQ,
-	CH_READHEADER,
-	CH_READ
-} chanstate;
-
-struct channel {
-	ev_io io;
-	int no;
-	char *url;
-	char *realurl;
-	chanstate state;
-	RingBuffer *rb;
-	size_t rbsize;
-	time_t lastclient;
-	time_t lastdata;
-	LIST_HEAD(, client) clients;
-	SLIST_ENTRY(channel) link;
-};
-
-struct client {
-	ev_io io;
-	struct channel *channel;
-	char rbuf[256];
-	int rbytes, rcapa;
-	LIST_ENTRY(client) link;
-};
-
-SLIST_HEAD(, channel) channels;
-struct prog_opt topor_opt;
+extern SLIST_HEAD(, channel) channels;
+extern struct prog_opt topor_opt;
+extern FILE *logfp;
 
 void
 channel_connect(struct channel *chan);
@@ -195,7 +161,7 @@ const char *client_hdr = "HTTP/1.1 200 OK\r\nContent-Type:application/octet-stre
 void
 client_read(ev_io *w, int revents)
 {
-	printf("client_read fd %i\n", w->fd);
+	wrlog(L_ANNOY, "client_read fd %i", w->fd);
 	struct client *c = (struct client *)w;
 	int r = recv(w->fd, c->rbuf + c->rbytes, sizeof(c->rbuf) - c->rbytes, 0);
 	if (r < 0) {
@@ -252,7 +218,7 @@ client_read(ev_io *w, int revents)
 		}
 	}
 
-	fprintf(stderr, "can't parse request\n");
+	wrlog(L_WARNING, "can't parse request");
 	client_close(c);
 }
 
@@ -264,13 +230,13 @@ http_sock(const char *url)
 
 	struct parsed_url *purl = parse_url(url);
 	if (NULL == purl) {
-		fprintf(stderr, "bad url %s\n", url);
+		wrlog(L_ERROR, "bad url %s", url);
 		return -1;
 	}
 
 	if( strcmp("http", purl->scheme)) {
 		parsed_url_free(purl);
-		fprintf(stderr, "not http url %s\n", url);
+		wrlog(L_ERROR, "not http url %s", url);
 		return -1;
 	}
 
@@ -280,14 +246,14 @@ http_sock(const char *url)
 
 	if (port <= 0 || port >= 0xffff) {
 		parsed_url_free(purl);
-		fprintf(stderr, "bad port %d in url %s\n", port, url);
+		wrlog(L_ERROR, "bad port %d in url %s", port, url);
 		return -1;
 	}
 
 	struct  hostent *hp = gethostbyname(purl->host);
 	if (NULL == hp) {
 		parsed_url_free(purl);
-		fprintf(stderr, "cant resolve host %s\n", purl->host);
+		wrlog(L_ERROR, "cant resolve host %s", purl->host);
 		return -1;
 	}
 
@@ -332,7 +298,7 @@ channel_close(struct channel *chan)
 	chan->realurl = NULL;
 	chan->rb = NULL;
 	chan->state = CH_STOP;
-	fprintf(stderr, "close channel %d\n", chan->no);
+	wrlog(L_INFO, "close channel %d", chan->no);
 }
 
 void
@@ -349,7 +315,7 @@ channel_cb(ev_io *w, int revents)
 		size_t buflen = rb_writesize(chan->rb, 16384);
 
 		ssize_t r = recv(w->fd, buf, buflen, 0);
-//		printf("channel %d read %zi bytes\n", chan->no, r);
+		wrlog(L_ANNOY, "channel %d read %zi bytes", chan->no, r);
 
 		if (r < 0) {
 			perror("recv");
@@ -400,7 +366,7 @@ channel_cb(ev_io *w, int revents)
 					goto err;
 				*crlf = 0;
 
-				printf("Redirect: %s\n", location);
+				wrlog(L_INFO, "Redirect: %s", location);
 
 				char *red_addr = NULL;
 				if (sscanf(location, "Location: %as", &red_addr) != 1)
@@ -432,7 +398,7 @@ err:
 			rb_reset(chan->rb);
 			chan->state = CH_READ;
 			chan->lastdata = chan->lastclient = time(NULL);
-			fprintf(stderr,"connect channel %d\n", chan->no);
+			wrlog(L_INFO,"connect channel %d", chan->no);
 		}
 		if( ! LIST_EMPTY(&chan->clients) ) {
 			chan->lastclient = time(NULL);
@@ -569,7 +535,16 @@ int main(int argc, char* const argv[])
 	
 	if(SLIST_EMPTY(&channels)) {
 		fprintf(stderr,"No channels to relay!\n");
-		abort();
+		exit(1);
+	}
+
+	logfp = stderr;
+	if (topor_opt.logfile) {
+		logfp = fopen(topor_opt.logfile, "a");
+		if (!logfp) {
+			fprintf(stderr,"Can't open log '%s'! %s\n", topor_opt.logfile, strerror(errno));
+			exit(1);
+		}
 	}
 
 	ev_io io;
