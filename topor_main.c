@@ -38,7 +38,7 @@ server_socket(struct sockaddr_in *sin)
 	int sndbufsize = 1024*1024;
 
 	if ((fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-		perror("socket");
+		error_log(errno , "Server socket create error");
 		return -1;
 	}
 
@@ -46,39 +46,39 @@ server_socket(struct sockaddr_in *sin)
 			setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one)) == -1 ||
 			setsockopt(fd, SOL_SOCKET, SO_LINGER, &ling, sizeof(ling)) == -1)
 	{
-		perror("setsockopt");
+		error_log(errno, "Server setsockopt error");
 		close(fd);
 		return -1;
 	}
 
 	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbufsize, sizeof(sndbufsize)) == -1) {
-		perror("so_sndbuf");
+		error_log(errno, "Sevrer socket sendbuf error");
 		close(fd);
 		return -1;
 	}
 
 	if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) == -1) {
-		perror("setsockopt");
+		error_log(errno, "Server tcp_nodelay set error");
 		close(fd);
 		return -1;
 	}
 
 	if (ioctl(fd, FIONBIO, &nonblock) < 0) {
-		perror("ioctl");
+		error_log(errno, "Server socket set nonblock error");
 		close(fd);
 		return -1;
 	}
 
 
 	if (bind(fd, (struct sockaddr *)sin, sizeof(*sin)) == -1) {
-		perror("bind");
+		error_log(errno, "Server socket bind error");
 		close(fd);
 		return -1;
 	}
 
 
 	if (listen(fd, 64) == -1) {
-		perror("listen");
+		error_log(errno, "Server socket listen error");
 		close(fd);
 		return -1;
 	}
@@ -91,19 +91,19 @@ server_accept(ev_io *w, int revents)
 {
 	int fd = accept(w->fd, NULL, NULL);
 	if (fd < 0) {
-		perror("accept");
+		wrlog(L_CRITICAL, "Client accept error: %s", strerror(errno));
 		return;
 	}
 
 	int one = 1;
 	if (ioctl(fd, FIONBIO, &one) < 0) {
-		perror("ioctl");
+		wrlog(L_CRITICAL, "Client nonblock ioctl error: %s", strerror(errno));
 		close(fd);
 		return;
 	}
 
 	if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) == -1) {
-		perror("setsockopt");
+		wrlog(L_CRITICAL, "Client tcp_nodelay setsockopt error: %s", strerror(errno));
 		/* Do nothing, not a fatal error.  */
 	}
 
@@ -133,7 +133,7 @@ client_write(struct client *c, const char *buf, size_t len)
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
 
-			perror("client send");
+			wrlog(L_INFO, "Client send error: %s", strerror(errno)); // TODO add client address
 			client_close(c);
 			return -1;
 		}
@@ -168,7 +168,7 @@ client_read(ev_io *w, int revents)
 		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
 			return;
 
-		perror("recv");
+		wrlog(L_ERROR, "Client receive error: %s", strerror(errno)); // TODO add client address
 		client_close(c);
 		return;
 	}
@@ -265,19 +265,19 @@ http_sock(const char *url)
 
 	int fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (fd < 0) {
-		perror("socket");
+		wrlog(L_ERROR, "Create channel socket error: %s", strerror(errno));
 		goto err;
 	}
 
 	if (ioctl(fd, FIONBIO, &nonblock) < 0) {
-		perror("ioctl");
+		wrlog(L_ERROR, "Channel socket set nonblock error: %s", strerror(errno));
 		close(fd);
 		goto err;
 	}
 
 	int r = connect(fd, (struct sockaddr *)&sin, sizeof(sin));
 	if (r < 0 && errno != EINPROGRESS) {
-		perror("connect");
+		wrlog(L_ERROR, "Channel socket connect error: %s", strerror(errno));
 		goto err;
 	}
 
@@ -318,7 +318,7 @@ channel_cb(ev_io *w, int revents)
 		wrlog(L_ANNOY, "channel %d read %zi bytes", chan->no, r);
 
 		if (r < 0) {
-			perror("recv");
+			wrlog(L_ERROR, "Channel receive error: %s", strerror(errno));
 			abort(); // FIXME
 		}
 
@@ -342,7 +342,7 @@ channel_cb(ev_io *w, int revents)
 			getsockopt(w->fd, SOL_SOCKET, SO_ERROR, &err, &len);
 			if (err) {
 				// error happen
-				perror("channel connect");
+				wrlog(L_ERROR, "Channel connect error: %s", strerror(errno));
 				ev_io_stop(w);
 				close(w->fd);
 				LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
@@ -378,7 +378,6 @@ channel_cb(ev_io *w, int revents)
 				rb_reset(chan->rb);
 				int fd = http_sock(red_addr);
 				if (fd < 0) {
-					perror("socket");
 					return;
 				}
 				
@@ -415,7 +414,7 @@ err:
 		       		purl = parse_url(chan->url);
 			snprintf(buf, sizeof(buf) - 1, "GET /%s HTTP/1.1\r\nHost: %s\r\n\r\n", purl->path, purl->host);
 			if (send(w->fd, buf, strlen(buf), MSG_NOSIGNAL) != strlen(buf)) {
-				perror("server send");
+				wrlog(L_ERROR, "Channel send request error: %s", strerror(errno));
 				return;
 			}
 			ev_io_stop(&chan->io);
@@ -463,7 +462,7 @@ timer_cb(struct ev_timer *w, int revents)
 	struct channel *chan;
 	SLIST_FOREACH(chan, &channels, link) {
 		if (chan->state == CH_READ) {
-			if (t - chan->lastdata > 10 || t - chan->lastclient > 10) {
+			if (t - chan->lastdata > 10 || t - chan->lastclient > 20) {
 				close(chan->io.fd);
 				channel_close(chan);
 			}
@@ -499,13 +498,12 @@ int main(int argc, char* const argv[])
 
 	ssin = sinsock(&sin, &topor_opt);
 	if(NULL == ssin) {
-		perror("Bad listen");
+		error_log(errno, "Bad listen");
 		abort();
 	}
 	int fd = server_socket(ssin);
 	if (fd < 0) {
-		perror("Cannot bind");
-		abort();
+		exit(1);
 	}
 
 	const char *config = CONFIG_NAME;
@@ -538,7 +536,6 @@ int main(int argc, char* const argv[])
 		exit(1);
 	}
 
-	logfp = stderr;
 	if (topor_opt.logfile) {
 		logfp = fopen(topor_opt.logfile, "a");
 		if (!logfp) {

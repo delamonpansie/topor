@@ -117,7 +117,17 @@ wrlog(loglevel level, const char *format, ...)
 	struct timeval tv_now;
 	int rc = 0, n = 0, total = 0;
 
-	if (level > topor_opt.loglevel) return rc;
+	if (level > topor_opt.loglevel)
+		return rc;
+
+	if (!logfp) {
+		va_start( ap, format );
+		n = vfprintf( stderr, format, ap );
+		va_end( ap );
+		fputc('\n', stderr);
+		return n;
+	}
+
 	(void)gettimeofday( &tv_now, NULL );
 	errno = 0;
 	do {
@@ -168,7 +178,8 @@ error_log( int err, const char* format, ... )
 			strerror(err) );
 
 	syslog( LOG_ERR | LOG_LOCAL0, "%s", buf );
-	if( logfp ) (void) wrlog( L_EMERGENCY, "%s\n", buf );
+	if( logfp ) (void) wrlog( L_EMERGENCY, "%s", buf );
+	else fprintf(stderr, "%s\n", buf);
 
 	return;
 }

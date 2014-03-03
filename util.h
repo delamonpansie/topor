@@ -23,6 +23,7 @@ extern "C" {
 
 int daemonize(int options);
 int wrlog( loglevel level, const char *format, ...);
+void error_log( int err, const char* format, ... );
 
 #ifdef __cplusplus
 }
