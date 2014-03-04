@@ -22,6 +22,7 @@ extern "C" {
 #endif
 
 int daemonize(int options);
+int make_pidfile( const char* fpath, pid_t pid );
 int wrlog( loglevel level, const char *format, ...);
 void error_log( int err, const char* format, ... );
 

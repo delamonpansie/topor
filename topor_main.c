@@ -133,7 +133,7 @@ client_write(struct client *c, const char *buf, size_t len)
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
 
-			wrlog(L_INFO, "Client send error: %s", strerror(errno)); // TODO add client address
+			wrlog(L_DEBUG, "Client send error: %s", strerror(errno)); // TODO add client address
 			client_close(c);
 			return -1;
 		}
@@ -533,15 +533,32 @@ int main(int argc, char* const argv[])
 	
 	if(SLIST_EMPTY(&channels)) {
 		fprintf(stderr,"No channels to relay!\n");
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
 	if (topor_opt.logfile) {
 		logfp = fopen(topor_opt.logfile, "a");
 		if (!logfp) {
 			fprintf(stderr,"Can't open log '%s'! %s\n", topor_opt.logfile, strerror(errno));
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
+	}
+
+	if (! topor_opt.is_foreground) {
+		if(NULL == logfp) {
+			fprintf(stderr,"Must specify log file when run as daemon!\n");
+			exit(EXIT_FAILURE);
+		}
+		if (0 != (rc = daemonize(0))) {
+			fprintf(stderr,"Can't run as daemon!\n");
+			exit(EXIT_FAILURE);
+		}
+	}
+	wrlog(L_EMERGENCY, "Topor start");
+
+	if( topor_opt.pidfile && 0 != (rc = make_pidfile( topor_opt.pidfile, getpid())) ) {
+		fprintf(stderr, "Can't create pidfile %s!\n", topor_opt.pidfile);
+		exit(EXIT_FAILURE);
 	}
 
 	ev_io io;
@@ -551,7 +568,17 @@ int main(int argc, char* const argv[])
 	ev_timer sectimer;
 	ev_timer_init(&sectimer, timer_cb, 1., 1.);
 	ev_timer_again(&sectimer);
-
 	ev_run(0);
+
+	wrlog(L_EMERGENCY, "Topor stopped");
+	if (topor_opt.pidfile) {
+		if( -1 == unlink(topor_opt.pidfile) ) {
+			error_log(errno, "unlink [%s]", topor_opt.pidfile );
+		}
+	}
+
+	free_opt(&topor_opt);
+	if (logfp)
+		fclose(logfp);
 	return 0;
 }

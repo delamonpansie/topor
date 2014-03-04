@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -34,12 +35,12 @@ daemonize(int options)
 
 	do {
 		if( -1 == (rc = setsid()) ) {
-			perror("setsid");
+			error_log(errno, "setsid");
 			break;
 		}
 
 		if( -1 == (rc = chdir("/")) ) {
-			perror("chdir");
+			error_log(errno, "chdir");
 			break;
 		}
 
@@ -48,13 +49,13 @@ daemonize(int options)
 		if( !(options & DZ_STDIO_OPEN) ) {
 			for( fh = 0; fh < 3; ++fh )
 				if( -1 == (rc = close(fh)) ) {
-					perror("close");
+					error_log(errno, "close");
 					break;
 				}
 		}
 
 		if( SIG_ERR == signal(SIGHUP, SIG_IGN) ) {
-			perror("signal");
+			error_log(errno, "signal");
 			rc = 2;
 			break;
 		}
@@ -75,6 +76,83 @@ daemonize(int options)
 	return 0;
 }
 
+/* write-lock on a file handle
+ */
+static int
+wlock_file( int fd )
+{
+	struct flock  lck;
+
+	lck.l_type      = F_WRLCK;
+	lck.l_start     = 0;
+	lck.l_whence    = SEEK_SET;
+	lck.l_len       = 0;
+
+	return fcntl( fd, F_SETLK, &lck );
+}
+
+int
+make_pidfile( const char* fpath, pid_t pid )
+{
+	int fd = -1, rc = 0, n = -1;
+	ssize_t nwr = -1;
+
+#define LLONG_MAX_DIGITS 21
+	char buf[ LLONG_MAX_DIGITS + 1 ];
+
+	mode_t fmode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+
+	errno = 0;
+	do {
+		fd = open( fpath, O_CREAT | O_WRONLY | O_NOCTTY, fmode );
+		if( -1 == fd ) {
+			error_log(errno, "make_pidfile - open");
+			rc = EXIT_FAILURE;
+			break;
+		}
+
+		rc = wlock_file( fd );
+		if( 0 != rc ) {
+			if( (EACCES == errno) || (EAGAIN == errno) ) {
+				(void) fprintf( stderr, "File [%s] is locked "
+						"(another instance of daemon must be running)\n",
+						fpath );
+				exit(EXIT_FAILURE);
+			}
+
+			error_log(errno, "wlock_file");
+			break;
+		}
+
+		rc = ftruncate( fd, 0 );
+		if( 0 != rc ) {
+			error_log(errno, "make_pidfile - ftruncate");
+			break;
+		}
+
+		n = snprintf( buf, sizeof(buf) - 1, "%d", pid );
+		if( n < 0 ) {
+			error_log(errno, "make_pidfile - snprintf");
+			rc = EXIT_FAILURE;
+			break;
+		}
+
+		nwr = write( fd, buf, n );
+		if( (ssize_t)n != nwr ) {
+			error_log(errno, "make_pidfile - write");
+			rc = EXIT_FAILURE;
+			break;
+		}
+
+	} while(0);
+
+	if( (0 != rc) && (fd > 0) ) {
+		(void)close( fd );
+	}
+
+	return rc;
+}
+
 /* create timestamp string in YYYY-mm-dd HH24:MI:SS from struct timeval
  */
 int
@@ -93,13 +171,13 @@ mk_tstamp( const struct timeval* tv, char* buf, size_t* len,
 		? gmtime_r( &clock, &src_tm )
 		: localtime_r( &clock, &src_tm );
 	if( NULL == p_tm ) {
-		perror("gmtime_r/localtime_r");
+		error_log(errno, "gmtime_r/localtime_r");
 		return errno;
 	}
 
 	n = strftime( buf, *len, tmfmt_TZ, &src_tm );
 	if( 0 == n ) {
-		perror( "strftime" );
+		error_log(errno, "strftime" );
 		return errno;
 	}
 
@@ -150,10 +228,11 @@ wrlog(loglevel level, const char *format, ...)
 	} while(0);
 
 	if( n <= 0 ) {
-		perror( "fprintf/vfprintf" );
+		error_log(errno, "fprintf/vfprintf" );
 		return -1;
 	}
 	fputc('\n', logfp);
+	fflush(logfp);
 
 	return (0 != rc) ? -1 : total;
 }
@@ -177,7 +256,6 @@ error_log( int err, const char* format, ... )
 	snprintf( buf + n, sizeof(buf) - n - 1, ": %s",
 			strerror(err) );
 
-	syslog( LOG_ERR | LOG_LOCAL0, "%s", buf );
 	if( logfp ) (void) wrlog( L_EMERGENCY, "%s", buf );
 	else fprintf(stderr, "%s\n", buf);
 
