@@ -292,7 +292,10 @@ err:
 void
 channel_close(struct channel *chan)
 {
+	struct client *client, *tmp;
 	ev_io_stop(&chan->io);
+	LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
+		client_close(client);
 	rb_free(chan->rb);
 	if (chan->realurl) free(chan->realurl);
 	chan->realurl = NULL;
@@ -326,8 +329,6 @@ channel_cb(ev_io *w, int revents)
 			/* eof */
 			ev_io_stop(w);
 			close(w->fd);
-			LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
-				client_close(client);
 			channel_close(chan);
 			return;
 		}
@@ -345,8 +346,6 @@ channel_cb(ev_io *w, int revents)
 				wrlog(L_ERROR, "Channel connect error: %s", strerror(errno));
 				ev_io_stop(w);
 				close(w->fd);
-				LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
-					client_close(client);
 				channel_close(chan);
 				return;
 			} else {
