@@ -313,11 +313,14 @@ void
 channel_close(struct channel *chan)
 {
 	struct client *client, *tmp;
+	close(chan->io.fd);
 	ev_io_stop(&chan->io);
+
 	LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
 		client_close(client);
-	free(chan->rb); /* FIXME: is this sufficient ? */
-	if (chan->realurl) free(chan->realurl);
+
+	free(chan->rb);
+	free(chan->realurl);
 	chan->realurl = NULL;
 	chan->rb = NULL;
 	chan->state = CH_STOP;
@@ -344,8 +347,6 @@ channel_cb(ev_io *w, int revents)
 
 		if (0 == r) {
 			/* eof */
-			ev_io_stop(w);
-			close(w->fd);
 			channel_close(chan);
 			return;
 		}
@@ -358,8 +359,6 @@ channel_cb(ev_io *w, int revents)
 			if (err) {
 				// error happen
 				wrlog(L_ERROR, "Channel connect error: %s", strerror(errno));
-				ev_io_stop(w);
-				close(w->fd);
 				channel_close(chan);
 				return;
 			} else {
@@ -479,10 +478,8 @@ timer_cb(struct ev_timer *w, int revents)
 	struct channel *chan;
 	SLIST_FOREACH(chan, &channels, link) {
 		if (chan->state == CH_READ) {
-			if (t - chan->lastdata > 10 || t - chan->lastclient > 20) {
-				close(chan->io.fd);
+			if (t - chan->lastdata > 10 || t - chan->lastclient > 20)
 				channel_close(chan);
-			}
 		}
 	}
 }
