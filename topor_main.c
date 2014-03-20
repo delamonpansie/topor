@@ -131,21 +131,25 @@ client_close(struct client *c)
 	free(c);
 }
 
-int
+ssize_t
 client_write(struct client *c, const char *buf, size_t len)
 {
-	for (;;) {
+	int i;
+	for (i = 0; i < 64; i++) {
+		errno = 0;
 		ssize_t r = send(c->io.fd, buf, len, MSG_NOSIGNAL);
 		if (r < 0) {
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
 
 			wrlog(L_DEBUG, "Client send error: %s", strerror(errno)); // TODO add client address
-			client_close(c);
-			return -1;
+			return r;
 		}
-		return 0;
+		if (r != len)
+			wrlog(L_DEBUG, "Client short write: %zi bytes lost", len - r);
+		return r;
 	}
+	return -1;
 }
 
 int
@@ -192,8 +196,8 @@ client_read(ev_io *w, int revents)
 
 		int cno = client_parse_get(c);
 		if (cno >= 0) {
-			if (client_write(c, client_hdr, strlen(client_hdr)) < 0)
-				return;
+			if (client_write(c, client_hdr, strlen(client_hdr)) != strlen(client_hdr))
+				goto close;
 
 			ev_io_stop(w);
 			struct channel *chan;
@@ -203,9 +207,11 @@ client_read(ev_io *w, int revents)
 						struct iovec iov[2];
 						size_t i, n = rb_iovec(chan->rb, iov, 2);
 						for (i = 0; i < n; i++) {
-							printf("clint preseed\n");
-							if (client_write(c, iov[i].iov_base, iov[i].iov_len) < 0)
-								return;
+							ssize_t r = client_write(c, iov[i].iov_base, iov[i].iov_len);
+							if (r < 0)
+								goto close;
+							if (r != iov[i].iov_len)
+								break;
 						}
 						LIST_INSERT_HEAD(&chan->clients, c, link);
 						return;
@@ -222,9 +228,11 @@ client_read(ev_io *w, int revents)
 				}
 			}
 		}
+	} else {
+		wrlog(L_WARNING, "can't parse request");
 	}
 
-	wrlog(L_WARNING, "can't parse request");
+close:
 	client_close(c);
 }
 
@@ -401,8 +409,11 @@ err:
 		}
 		if( ! LIST_EMPTY(&chan->clients) ) {
 			chan->lastclient = time(NULL);
-			LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
-				client_write(client, buf, r);
+			LIST_FOREACH_SAFE(client, &chan->clients, link, tmp) {
+				ssize_t cr = client_write(client, buf, r);
+				if (cr < 0)
+					client_close(client);
+			}
 		}
 	}
 	else if (revents & EV_WRITE) {
