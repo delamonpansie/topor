@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 
-#include  <netdb.h>
+#include <netdb.h>
+#include <assert.h>
 
 #include "topor.h"
 #include "url_parser.h"
@@ -193,12 +194,11 @@ client_read(ev_io *w, int revents)
 			SLIST_FOREACH(chan, &channels, link) {
 				if (chan->no == cno) {
 					if(chan->state == CH_READ) {
-						void *sbuf = malloc(chan->rbsize);
-						if (sbuf) {
-							rb_read(chan->rb, sbuf, chan->rbsize);
-							int r = client_write(c, sbuf, chan->rbsize);
-							free(sbuf);
-							if (r < 0)
+						struct iovec iov[2];
+						size_t i, n = rb_iovec(chan->rb, iov, 2);
+						for (i = 0; i < n; i++) {
+							printf("clint preseed\n");
+							if (client_write(c, iov[i].iov_base, iov[i].iov_len) < 0)
 								return;
 						}
 						LIST_INSERT_HEAD(&chan->clients, c, link);
@@ -296,7 +296,7 @@ channel_close(struct channel *chan)
 	ev_io_stop(&chan->io);
 	LIST_FOREACH_SAFE(client, &chan->clients, link, tmp)
 		client_close(client);
-	rb_free(chan->rb);
+	free(chan->rb); /* FIXME: is this sufficient ? */
 	if (chan->realurl) free(chan->realurl);
 	chan->realurl = NULL;
 	chan->rb = NULL;
@@ -312,12 +312,9 @@ channel_cb(ev_io *w, int revents)
 	struct client *client, *tmp;
 
 	if (revents & EV_READ) {
-		/* get pointer to ring buffer */
-		char *buf = rb_writepointer(chan->rb);
-		/* get buffer size available in ring buffer */
-		size_t buflen = rb_writesize(chan->rb, 16384);
+		char *buf = chan->rb->tail;
+		ssize_t r = rb_recv(w->fd, chan->rb, 0);
 
-		ssize_t r = recv(w->fd, buf, buflen, 0);
 		wrlog(L_ANNOY, "channel %d read %zi bytes", chan->no, r);
 
 		if (r < 0) {
@@ -333,9 +330,6 @@ channel_cb(ev_io *w, int revents)
 			return;
 		}
 		chan->lastdata = time(NULL);
-
-		/* shift pointer in ring buffer by r */
-		rb_write(chan->rb, NULL, r);
 
 		if(chan->state == CH_SENDREQ) {
 			int err;
@@ -353,8 +347,9 @@ channel_cb(ev_io *w, int revents)
 			}
 		}
 		if(chan->state == CH_READHEADER) {
-			char *data = rb_head(chan->rb);
-			char *lf = memmem(data, rb_can_read(chan->rb), "\r\n\r\n", 4);
+			assert(chan->rb->over == 0);
+			char *data = chan->rb->buff;
+			char *lf = memmem(data, rb_size(chan->rb), "\r\n\r\n", 4);
 			if (!lf) return;
 			lf[4] = '\0';
 

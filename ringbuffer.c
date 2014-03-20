@@ -2,129 +2,92 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/uio.h>
+
+#include <stdio.h>
+
 #include "ringbuffer.h"
 
-#define min(a, b) (a)<(b)?(a):(b)
-
-RingBuffer* 
+struct ringbuf *
 rb_new(size_t capacity)
 {
-	RingBuffer *rb = (RingBuffer *) malloc(sizeof(RingBuffer) + capacity);
-	if (rb == NULL) return NULL;
+	struct ringbuf *rb = malloc(sizeof(*rb) + capacity);
+	if (rb == NULL)
+		return NULL;
 
-	rb->rb_capacity	= capacity;
-	rb->rb_buff	= (char*)rb + sizeof(RingBuffer);
-	rb->rb_tail	= rb->rb_buff;
-	rb->rb_size	= 0;
+	rb->capacity	= capacity;
+	rb->tail	= rb->buff;
+	rb->over	= 0;
 	return rb;
 };
 
 void
-rb_free(RingBuffer *rb)
+rb_reset(struct ringbuf *rb)
 {
-	free((char*)rb);
+	assert(rb != NULL);
+	rb->tail = rb->buff;
+	rb->over = 0;
 }
 
 size_t
-rb_capacity(RingBuffer *rb)
+rb_size(struct ringbuf *rb)
 {
-	assert(rb != NULL);
-	return rb->rb_capacity;
-}
-
-size_t
-rb_can_read(RingBuffer *rb)
-{
-	assert(rb != NULL);
-	return rb->rb_size;
-}
-
-char *
-rb_head(RingBuffer *rb)
-{
-	assert(rb != NULL);
-	return rb->rb_buff;
+	return rb->tail - rb->buff;
 }
 
 void
-rb_reset(RingBuffer *rb)
+rb_append(struct ringbuf *rb, const void *data, size_t count)
 {
-	assert(rb != NULL);
-	rb->rb_buff = (char*)rb + sizeof(RingBuffer);
-	rb->rb_tail = rb->rb_buff;
-	rb->rb_size = 0;
+	ssize_t free = rb->capacity - rb_size(rb);
+	if (count > free) {
+		rb->over = 1;
+
+		memcpy(rb->tail, data, free);
+		rb->tail = rb->buff;
+		data += free;
+		count -= free;
+	}
+
+	memcpy(rb->tail, data, count);
 }
 
 size_t
-rb_read(RingBuffer *rb, void *data, size_t count)
+rb_recv(int fd, struct ringbuf *rb, int flags)
 {
-	assert(rb != NULL);
-	assert(data != NULL);
+	size_t free = rb->capacity - rb_size(rb);
+	ssize_t r = recv(fd, rb->tail, free, flags);
 
-	if(rb->rb_size < rb->rb_capacity) {
-		memcpy(data, rb->rb_buff, min(count, rb->rb_size));
-		return min(count, rb->rb_size);
+	if (r <= 0)
+		return r;
+
+	if (r < free) {
+		rb->tail += r;
+	} else {
+		rb->tail = rb->buff;
+		rb->over = 1;
 	}
 
-	int tail_avail_sz = rb->rb_capacity - (rb->rb_tail - rb->rb_buff);
-	if(count > rb->rb_capacity)
-		count = rb->rb_capacity;
+//printf("recv:%zi rb_size:%zi over:%i\n", r, rb_size(rb), rb->over);
 
-	if (count <= tail_avail_sz) {
-		memcpy(data, rb->rb_tail, count);
-		return count;
-	}
-	else {
-		memcpy(data, rb->rb_tail, tail_avail_sz);
-		memcpy(rb->rb_buff, (char*)data+tail_avail_sz, count-tail_avail_sz);
-		return count;
-	}
+	return r;
 }
 
 size_t
-rb_write(RingBuffer *rb, const void *data, size_t count)
+rb_iovec(struct ringbuf *rb, struct iovec *iov, size_t count)
 {
-	assert(rb != NULL);
+	assert(count >= 2);
 
-	if (count > rb->rb_capacity) return -1;
-
-	int tail_avail_sz = rb->rb_capacity - (rb->rb_tail - rb->rb_buff);
-
-	if (count <= tail_avail_sz) {
-		if(data)
-			memcpy(rb->rb_tail, data, count);
-		rb->rb_tail += count;
-		if (rb->rb_tail == rb->rb_buff+rb->rb_capacity)
-			rb->rb_tail = rb->rb_buff;
+	if (rb->over) {
+		iov[0].iov_base = rb->tail;
+		iov[0].iov_len = rb->capacity - rb_size(rb);
+		iov[1].iov_base = rb->buff;
+		iov[1].iov_len = rb_size(rb);
+		return 2;
+	} else {
+		iov[0].iov_base = rb->buff;
+		iov[0].iov_len = rb_size(rb);
+		return 1;
 	}
-	else {
-		if(data)
-			memcpy(rb->rb_tail, data, tail_avail_sz);
-		rb->rb_tail = rb->rb_buff;
-		if(data)
-			memcpy(rb->rb_tail, (char*)data+tail_avail_sz, count-tail_avail_sz);
-		rb->rb_tail += count-tail_avail_sz;
-	}
-	rb->rb_size += count;
-	if(rb->rb_size > rb->rb_capacity)
-		rb->rb_size = rb->rb_capacity;
-	return count;
 }
-
-size_t
-rb_writesize(RingBuffer *rb, size_t count)
-{
-	assert(rb != NULL);
-
-	if (count > rb->rb_capacity) return -1;
-
-	return rb->rb_capacity - (rb->rb_tail - rb->rb_buff);
-}
-
-void *
-rb_writepointer(RingBuffer *rb)
-{
-	assert(rb != NULL);
-	return rb->rb_tail;
-}
-

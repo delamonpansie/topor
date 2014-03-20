@@ -1,25 +1,21 @@
 #ifndef RINGBUFFER_H
 #define RINGBUFFER_H
 
-#include <stdlib.h>
+#include <stdint.h>
+struct iovec;
 
-typedef struct ringbuffer {
-	size_t rb_capacity;
-	size_t rb_size;;
-	char  *rb_tail;
-	char  *rb_buff;
-} RingBuffer;
+struct ringbuf {
+	size_t capacity;
+	char over;
+	char  *tail;
+	char  buff[];
+};
 
-RingBuffer* rb_new(size_t capacity);
-void	rb_free(RingBuffer *rb);
+struct ringbuf *rb_new(size_t capacity);
 
-size_t	rb_capacity(RingBuffer *rb);
-size_t	rb_can_read(RingBuffer *rb);
-char*	rb_head(RingBuffer *rb);
-void	rb_reset(RingBuffer *rb);
-size_t	rb_read(RingBuffer *rb, void *data, size_t count);
-size_t	rb_write(RingBuffer *rb, const void *data, size_t count);
-size_t	rb_writesize(RingBuffer *rb, size_t count);
-void*	rb_writepointer(RingBuffer *rb);
-
+void rb_reset(struct ringbuf *rb);
+void rb_append(struct ringbuf *rb, const void *data, size_t count);
+size_t rb_size(struct ringbuf *rb);
+size_t rb_recv(int fd, struct ringbuf *rb, int flags);
+size_t rb_iovec(struct ringbuf *rb, struct iovec *iov, size_t count);
 #endif

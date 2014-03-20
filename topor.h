@@ -55,7 +55,7 @@ struct channel {
 	char *url;
 	char *realurl;
 	chanstate state;
-	RingBuffer *rb;
+	struct ringbuf *rb;
 	size_t rbsize;
 	time_t lastclient;
 	time_t lastdata;
