@@ -1,11 +1,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
+#include "topor.h"
+extern SLIST_HEAD(, channel) channels;
+extern struct prog_opt topor_opt;
+extern struct channel *
+channel_init(int cno, const char *url, size_t bufsize);
 
 static __inline__ int
 is_space(char c)
 {
 	if(c == ' ' || c == '\t' || c == '\n' || c == '\r') return 1;
+	return 0;
+}
+
+static __inline__ int
+is_digit(char c)
+{
+	if(c >= '0' && c <= '9') return 1;
 	return 0;
 }
 
@@ -34,9 +46,11 @@ parseline(char *p, int *cno, char **url, size_t *bufsize)
 {
 	p = skipspaces(p);
 	if(*p == '\0' || *p =='\r' || *p == '\n' || *p == '#') return 0;
-	*cno = atoi(p);
-	p = skipsymbols(p);
-	p = skipspaces(p);
+	if(is_digit(*p)) {
+		*cno = atoi(p);
+		p = skipsymbols(p);
+		p = skipspaces(p);
+	}
 	if(*p == '\0') return 1;
 	char *op = p;
 	p = skipsymbols(p);
@@ -50,3 +64,25 @@ parseline(char *p, int *cno, char **url, size_t *bufsize)
 	return 3;
 }
 
+int
+parse_config(FILE *fd)
+{
+	char buf[1025];
+	int r, i=0, cno=1;
+	size_t bufsize;
+	char *churl;
+	while(!feof(fd)) {
+		fgets(buf, sizeof(buf)-1, fd);
+		++i;
+		bufsize = 0;
+		r = parseline(buf, &cno, &churl, &bufsize);
+		if(0 == r) continue;
+		if(1 == r) {
+			fprintf(stderr,"No channel url on line %d\n",i);
+			continue;
+		}
+		if(channel_init(cno, churl, bufsize) == NULL) return 0; //FIXME
+		cno++;
+	}
+	return 1;
+}

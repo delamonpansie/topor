@@ -111,6 +111,7 @@ get_opt(int argc, char* const argv[], struct prog_opt *topor_opt)
 				  }
 				  break;
 			case 'f': topor_opt->is_foreground = f_TRUE;
+				  topor_opt->loglevel = L_DEBUG;
 				  break;
 			case 'b':
 				  rc = get_ipaddr( optarg, topor_opt->listen_addr, sizeof(topor_opt->listen_addr) );

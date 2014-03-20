@@ -486,7 +486,6 @@ timer_cb(struct ev_timer *w, int revents)
 
 int main(int argc, char* const argv[])
 {
-	char buf[1025];
 	int rc;
 	struct sockaddr_in sin, *ssin;
 
@@ -524,21 +523,10 @@ int main(int argc, char* const argv[])
 	if(topor_opt.configfile) config = topor_opt.configfile;
 	FILE *cf = fopen(config, "r");
 	if(cf) {
-		int r, i=0, cno=0;
-		size_t bufsize;
-		char *churl;
-		while(!feof(cf)) {
-			fgets(buf, sizeof(buf)-1, cf);
-			++i;
-			bufsize = 0;
-			r = parseline(buf, &cno, &churl, &bufsize);
-			if(0 == r) continue;
-			if(1 == r) {
-				fprintf(stderr,"No channel url on line %d\n",i);
-				continue;
-			}
-			if(channel_init(cno, churl, bufsize) == NULL) abort(); //FIXME
-		}
+		int cr = parse_config(cf);
+		if(cr) 
+			fprintf(stderr,"Read config error\n");
+
 		fclose(cf);
 	}
 	else {
