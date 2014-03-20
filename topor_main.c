@@ -394,7 +394,7 @@ channel_cb(ev_io *w, int revents)
 				if (fd < 0) {
 					return;
 				}
-				
+
 				if (chan->realurl) free(chan->realurl);
 				chan->realurl = strdup(red_addr);
 				chan->state = CH_CONNECT;
@@ -449,7 +449,7 @@ channel_connect(struct channel *chan)
 	int fd = http_sock(chan->url);
 	if (fd < 0)
 		return;
-	chan->rb = rb_new(chan->rbsize);	
+	chan->rb = rb_new(chan->rbsize);
 	chan->state = CH_CONNECT;
 
 	ev_io_init(&chan->io, channel_cb, fd, EV_READ | EV_WRITE);
