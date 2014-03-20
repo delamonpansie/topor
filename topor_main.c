@@ -108,6 +108,12 @@ server_accept(ev_io *w, int revents)
 		/* Do nothing, not a fatal error.  */
 	}
 
+	int len;
+	for (len = 1 << 22; len > 0; len -= 1 << 16)
+		if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &len, sizeof(len)) == 0)
+			break;
+
+
 	extern void client_read(ev_io *w, int revents);
 	struct client *client = calloc(sizeof(*client), 1);
 	ev_io_init(&client->io, (void *)client_read, fd, EV_READ);
