@@ -189,47 +189,53 @@ client_read(ev_io *w, int revents)
 	if (!lf && c->rbytes < sizeof(c->rbuf))
 		return;
 
-	if (lf) {
-		if (lf - 1 > c->rbuf && *(lf - 1) == '\r')
-			lf--;
-		*lf = 0;
-
-		int cno = client_parse_get(c);
-		if (cno >= 0) {
-			if (client_write(c, client_hdr, strlen(client_hdr)) != strlen(client_hdr))
-				goto close;
-
-			ev_io_stop(w);
-			struct channel *chan;
-			SLIST_FOREACH(chan, &channels, link) {
-				if (chan->no == cno) {
-					if(chan->state == CH_READ) {
-						struct iovec iov[2];
-						size_t i, n = rb_iovec(chan->rb, iov, 2);
-						for (i = 0; i < n; i++) {
-							ssize_t r = client_write(c, iov[i].iov_base, iov[i].iov_len);
-							if (r < 0)
-								goto close;
-							if (r != iov[i].iov_len)
-								break;
-						}
-						LIST_INSERT_HEAD(&chan->clients, c, link);
-						return;
-					}
-					else if(chan->state == CH_STOP) {
-						channel_connect(chan);
-						LIST_INSERT_HEAD(&chan->clients, c, link);
-						return;
-					}
-					else {
-						LIST_INSERT_HEAD(&chan->clients, c, link);
-						return;
-					}
-				}
-			}
-		}
-	} else {
+	if (!lf) {
 		wrlog(L_WARNING, "can't parse request");
+		goto close;
+	}
+
+	if (lf - 1 > c->rbuf && *(lf - 1) == '\r')
+		lf--;
+	*lf = 0;
+
+	int cno = client_parse_get(c);
+	if (cno < 0) {
+		wrlog(L_WARNING, "can't parse request");
+		goto close;
+	}
+
+	if (client_write(c, client_hdr, strlen(client_hdr)) != strlen(client_hdr)) {
+		wrlog(L_WARNING, "can't write header");
+		goto close;
+	}
+
+	ev_io_stop(w);
+	struct channel *chan;
+	SLIST_FOREACH(chan, &channels, link) {
+		if (chan->no != cno)
+			continue;
+
+		switch (chan->state) {
+		case CH_READ: {
+			struct iovec iov[2];
+			size_t i, n = rb_iovec(chan->rb, iov, 2);
+			for (i = 0; i < n; i++) {
+				ssize_t r = client_write(c, iov[i].iov_base, iov[i].iov_len);
+				if (r < 0)
+					goto close;
+				if (r != iov[i].iov_len)
+					break;
+			}
+			LIST_INSERT_HEAD(&chan->clients, c, link);
+			return;
+		}
+		case CH_STOP:
+			channel_connect(chan);
+		default:
+			LIST_INSERT_HEAD(&chan->clients, c, link);
+			return;
+		}
+		abort(); /* not reached */
 	}
 
 close:
