@@ -262,3 +262,33 @@ error_log( int err, const char* format, ... )
 	return;
 }
 
+const char *
+get_peerip(int fd)
+{
+    struct stat st;
+    struct sockaddr_in addr;
+    socklen_t len = 0;
+    int rc = 0;
+
+    if( -1 == (rc = fstat( fd, &st )) ) {
+        error_log( errno, "%s: fstat", __func__ );
+        return "Error";
+    }
+
+    if( S_ISREG( st.st_mode ) ) {
+        return "File";
+    }
+    else if( S_ISSOCK( st.st_mode ) ) {
+        len = sizeof(addr);
+        rc = getpeername( fd, (struct sockaddr*)&addr, &len );
+        if( 0 == rc ) {
+            return inet_ntoa(addr.sin_addr);
+        }
+        else {
+            error_log( errno, "%s: getpeername", __func__ );
+            return "Error";
+        }
+    } /* S_ISSOCK */
+
+    return "Unknown";
+}

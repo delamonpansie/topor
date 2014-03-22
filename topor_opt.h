@@ -23,6 +23,8 @@ struct prog_opt {
 	flag_t		is_foreground;
 	char		listen_addr[IPADDR_STR_SIZE];
 	int		listen_port;
+	int		chkeepalive;
+	int		chtimeout;
 	char*		logfile;
 	char*		configfile;
 	char*		pidfile;
@@ -46,7 +48,7 @@ void
 usage( const char* app, FILE* fp );
 
 int
-get_opt(int argc, char* const argv[], struct prog_opt *topor_opt);
+get_opt(int argc, char* const argv[] );
 
 #ifdef __cplusplus
 } /* extern "C" */

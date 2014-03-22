@@ -109,13 +109,15 @@ server_accept(ev_io *w, int revents)
 	}
 
 	int len;
-	for (len = 1 << 22; len > 0; len -= 1 << 16)
+	for (len = 1 << 22; len > 0; len -= 1 << 18)
 		if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &len, sizeof(len)) == 0)
 			break;
 
 
 	extern void client_read(ev_io *w, int revents);
 	struct client *client = calloc(sizeof(*client), 1);
+	const char *peerip = get_peerip(fd);
+	strncpy(client->addr, peerip, sizeof(client->addr));
 	ev_io_init(&client->io, (void *)client_read, fd, EV_READ);
 	ev_io_start(&client->io);
 }
@@ -142,11 +144,11 @@ client_write(struct client *c, const char *buf, size_t len)
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
 
-			wrlog(L_DEBUG, "Client send error: %s", strerror(errno)); // TODO add client address
+			wrlog(L_DEBUG, "Client %s send error: %s", c->addr, strerror(errno)); // TODO add client address
 			return r;
 		}
 		if (r != len)
-			wrlog(L_DEBUG, "Client short write: %zi bytes lost", len - r);
+			wrlog(L_DEBUG, "Client %s short write: %zi bytes lost", c->addr, len - r);
 		return r;
 	}
 	return -1;
@@ -179,7 +181,7 @@ client_read(ev_io *w, int revents)
 		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
 			return;
 
-		wrlog(L_ERROR, "Client receive error: %s", strerror(errno)); // TODO add client address
+		wrlog(L_ERROR, "Client %s receive error: %s", c->addr, strerror(errno)); // TODO add client address
 		client_close(c);
 		return;
 	}
@@ -190,7 +192,7 @@ client_read(ev_io *w, int revents)
 		return;
 
 	if (!lf) {
-		wrlog(L_WARNING, "can't parse request");
+		wrlog(L_WARNING, "Can't parse request from %s", c->addr);
 		goto close;
 	}
 
@@ -200,12 +202,12 @@ client_read(ev_io *w, int revents)
 
 	int cno = client_parse_get(c);
 	if (cno < 0) {
-		wrlog(L_WARNING, "can't parse request");
+		wrlog(L_WARNING, "Can't parse request from %s", c->addr);
 		goto close;
 	}
 
 	if (client_write(c, client_hdr, strlen(client_hdr)) != strlen(client_hdr)) {
-		wrlog(L_WARNING, "can't write header");
+		wrlog(L_WARNING, "Can't write header to %s", c->addr);
 		goto close;
 	}
 
@@ -424,7 +426,7 @@ err:
 	else if (revents & EV_WRITE) {
 		if(chan->state == CH_CONNECT) {
 			struct parsed_url *purl;
-			if (chan->realurl) 
+			if (chan->realurl)
 		       		purl = parse_url(chan->realurl);
 			else
 		       		purl = parse_url(chan->url);
@@ -478,7 +480,8 @@ timer_cb(struct ev_timer *w, int revents)
 	struct channel *chan;
 	SLIST_FOREACH(chan, &channels, link) {
 		if (chan->state == CH_READ) {
-			if (t - chan->lastdata > 10 || t - chan->lastclient > 20)
+			if (	(topor_opt.chtimeout > 0 && t-chan->lastdata > topor_opt.chtimeout) ||
+				(topor_opt.chkeepalive > 0 && t-chan->lastclient > topor_opt.chkeepalive) )
 				channel_close(chan);
 		}
 	}
@@ -503,7 +506,7 @@ int main(int argc, char* const argv[])
 	printf("ev_loop initialized using '%s' backend, libev version is %d.%d\n",
 			evb, ev_version_major(), ev_version_minor());
 
-	rc = get_opt(argc, argv, &topor_opt);
+	rc = get_opt(argc, argv);
 	if (rc) {
 		free_opt( &topor_opt );
 		return rc;
@@ -524,7 +527,7 @@ int main(int argc, char* const argv[])
 	FILE *cf = fopen(config, "r");
 	if(cf) {
 		int cr = parse_config(cf);
-		if(cr) 
+		if(cr)
 			fprintf(stderr,"Read config error\n");
 
 		fclose(cf);
@@ -532,7 +535,7 @@ int main(int argc, char* const argv[])
 	else {
 		fprintf(stderr,"Can't read file '%s'! %s\n", config, strerror(errno));
 	}
-	
+
 	if(SLIST_EMPTY(&channels)) {
 		fprintf(stderr,"No channels to relay!\n");
 		exit(EXIT_FAILURE);

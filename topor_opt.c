@@ -6,115 +6,122 @@
 #include "topor.h"
 #include "topor_opt.h"
 
+extern struct prog_opt topor_opt;
+
 /* convert input parameter into an IPv4-address string */
 int
 get_ipaddr( const char* s, char* buf, size_t len )
 {
-    struct sockaddr_in saddr;
-    int rc = 0;
+	struct sockaddr_in saddr;
+	int rc = 0;
 
-    assert( s && buf && len );
+	assert( s && buf && len );
 
-    if( 1 == inet_aton(s, &(saddr.sin_addr)) ) {
-        (void) strncpy( buf, s, len );
-    }
+	if( 1 == inet_aton(s, &(saddr.sin_addr)) ) {
+		(void) strncpy( buf, s, len );
+	}
 
-    buf[ len - 1 ] = 0;
-    return rc;
+	buf[ len - 1 ] = 0;
+	return rc;
 }
 
 /* populate options with default/initial values */
 int
 init_opt( struct prog_opt* so )
 {
-    int rc = 0;
-    assert( so );
+	int rc = 0;
+	assert( so );
 	so->is_foreground = 0;
 	so->listen_addr[0] = 0;
 	so->listen_port = 8888;
+	so->chtimeout = 20,
+	so->chkeepalive = 60,
 	so->logfile = so->configfile = so->pidfile = NULL;
 	so->loglevel = L_ERROR;
-    return rc;
+	return rc;
 }
 
 /* release resources allocated for strmproxy options */
 void
 free_opt( struct prog_opt* so )
 {
-    assert( so );
-    if( so->logfile ) 
-        free(so->logfile);
-    if( so->configfile ) 
-        free(so->configfile);
-    if( so->pidfile ) 
-        free(so->pidfile);
+	assert( so );
+	if( so->logfile )
+		free(so->logfile);
+	if( so->configfile )
+		free(so->configfile);
+	if( so->pidfile )
+		free(so->pidfile);
 }
 
 void
 usage( const char* app, FILE* fp )
 {
-    (void) fprintf (fp, "usage: %s [-f] [-v level] [-b listenaddr] [-p port] [-P pidfile]"
-            "[-l logfile] [-c configfile]\n"
-            , app );
-    (void) fprintf(fp,
-            "\t-v : set verbosity level 0-5 [default = 0]\n"
-            "\t-f : run foreground, do NOT run as a daemon\n"
-            "\t-b : (IPv4) address to listen on [default = %s]\n"
-            "\t-p : port to listen on\n"
-            "\t-l : log file name\n"
-            "\t-c : config file name\n"
-            "\t-P : pid file name\n"
-            ,IPv4_ALL);
-    (void) fprintf( fp, "Examples:\n"
-            "  %s -p 4022 \n"
-            "\tlisten for HTTP requests on port 4022, all network interfaces\n"
-            "  %s -b 192.168.1.1 -p 4022\n"
-            "\tlisten for HTTP requests on IP 192.168.1.1, port 4022;\n",
-            app, app);
-    return;
+	(void) fprintf (fp, "usage: %s [-f] [-v level] [-b listenaddr] [-p port] "
+		"[-t timeout] [-k keepalive] "
+		"[-c configfile] [-l logfile] [-P pidfile]\n"
+		, app );
+	(void) fprintf(fp,
+		"\t-v : set verbosity level 0-5 [default = 0]\n"
+		"\t-f : run foreground, do NOT run as a daemon\n"
+		"\t-b : (IPv4) address to listen on [default = %s]\n"
+		"\t-p : port to listen on\n"
+		"\t-t : timeout on channel data, sec [default = %d]\n"
+		"\t-k : timeout on channel data, sec [default = %d]\n"
+		"\t-l : log file name\n"
+		"\t-c : config file name\n"
+		"\t-P : pid file name\n"
+		,IPv4_ALL, topor_opt.chtimeout, topor_opt.chkeepalive);
+	(void) fprintf( fp, "Examples:\n"
+		"  %s -p 4022 \n"
+		"\tlisten for HTTP requests on port 4022, all network interfaces\n"
+		"  %s -b 192.168.1.1 -p 4022\n"
+		"\tlisten for HTTP requests on IP 192.168.1.1, port 4022;\n",
+		app, app);
+	return;
 }
 
 int
-get_opt(int argc, char* const argv[], struct prog_opt *topor_opt)
+get_opt(int argc, char* const argv[])
 {
 	int rc = 0, ch = 0;
-	static const char OPTMASK[] = "fv:b:l:p:c:P:";
+	static const char OPTMASK[] = "fv:b:l:p:t:k:c:P:";
 
-	rc = init_opt( topor_opt );
+	rc = init_opt( &topor_opt );
 	while( (0 == rc) && (-1 != (ch = getopt(argc, argv, OPTMASK))) ) {
 		switch( ch ) {
 			case 'v': if (optarg) {
 				  	int lvl = atoi( optarg );
 					switch (lvl) {
-						case 0: topor_opt->loglevel = L_ERROR;
+						case 0: topor_opt.loglevel = L_ERROR;
 							break;
-						case 1: topor_opt->loglevel = L_WARNING;
+						case 1: topor_opt.loglevel = L_WARNING;
 							break;
-						case 2: topor_opt->loglevel = L_NOTICE;
+						case 2: topor_opt.loglevel = L_NOTICE;
 							break;
-						case 3: topor_opt->loglevel = L_INFO;
+						case 3: topor_opt.loglevel = L_INFO;
 							break;
-						case 4: topor_opt->loglevel = L_DEBUG;
+						case 4: topor_opt.loglevel = L_DEBUG;
 							break;
-						case 5: topor_opt->loglevel = L_ANNOY;
+						case 5: topor_opt.loglevel = L_ANNOY;
 							break;
 						default: fprintf(stderr, "Bad verbosity level %s\n", optarg);
 							 rc = ERR_PARAM;
 					}
 					if (rc) {
-						free_opt( topor_opt );
+						free_opt( &topor_opt );
 						return rc;
 					}
 				  }
 				  else {
-					topor_opt->loglevel = L_WARNING;
+					topor_opt.loglevel = L_WARNING;
 				  }
 				  break;
-			case 'f': topor_opt->is_foreground = f_TRUE;
-				  topor_opt->loglevel = L_DEBUG;
+			case 'f': topor_opt.is_foreground = f_TRUE;
+				  topor_opt.loglevel = L_DEBUG;
 				  break;
 			case 'b':
-				  rc = get_ipaddr( optarg, topor_opt->listen_addr, sizeof(topor_opt->listen_addr) );
+				  rc = get_ipaddr( optarg, topor_opt.listen_addr, sizeof(topor_opt.listen_addr) );
 				  if( 0 != rc ) {
 					  (void) fprintf( stderr, "Invalid address: [%s]\n",
 							  optarg );
@@ -123,24 +130,42 @@ get_opt(int argc, char* const argv[], struct prog_opt *topor_opt)
 				  break;
 
 			case 'p':
-				  topor_opt->listen_port = atoi( optarg );
-				  if( topor_opt->listen_port <= 0 || topor_opt->listen_port >= 65536) {
+				  topor_opt.listen_port = atoi( optarg );
+				  if( topor_opt.listen_port <= 0 || topor_opt.listen_port >= 65536) {
 					  (void) fprintf( stderr, "Invalid port number: [%d]\n",
-							  topor_opt->listen_port );
+							  topor_opt.listen_port );
+					  rc = ERR_PARAM;
+				  }
+				  break;
+
+			case 't':
+				  topor_opt.chtimeout = atoi( optarg );
+				  if( topor_opt.chtimeout < 0 ) {
+					  (void) fprintf( stderr, "Invalid timeout: [%d]\n",
+							  topor_opt.chtimeout );
+					  rc = ERR_PARAM;
+				  }
+				  break;
+
+			case 'k':
+				  topor_opt.chkeepalive = atoi( optarg );
+				  if( topor_opt.chkeepalive < 0 ) {
+					  (void) fprintf( stderr, "Invalid keepalive: [%d]\n",
+							  topor_opt.chkeepalive );
 					  rc = ERR_PARAM;
 				  }
 				  break;
 
 			case 'l':
-				  topor_opt->logfile = strdup(optarg);
+				  topor_opt.logfile = strdup(optarg);
 				  break;
 
 			case 'c':
-				  topor_opt->configfile = strdup(optarg);
+				  topor_opt.configfile = strdup(optarg);
 				  break;
 
 			case 'P':
-				  topor_opt->pidfile = strdup(optarg);
+				  topor_opt.pidfile = strdup(optarg);
 				  break;
 
 			case ':':
@@ -164,7 +189,7 @@ get_opt(int argc, char* const argv[], struct prog_opt *topor_opt)
 	} /* while getopt */
 
 	if (rc) {
-		free_opt( topor_opt );
+		free_opt( &topor_opt );
 		return rc;
 	}
 	return rc;

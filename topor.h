@@ -65,6 +65,7 @@ struct channel {
 
 struct client {
 	ev_io io;
+	char addr[IPADDR_STR_SIZE];
 	struct channel *channel;
 	char rbuf[256];
 	int rbytes, rcapa;
