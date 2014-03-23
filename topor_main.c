@@ -118,6 +118,10 @@ server_accept(ev_io *w, int revents)
 	struct client *client = calloc(sizeof(*client), 1);
 	const char *peerip = get_peerip(fd);
 	strncpy(client->addr, peerip, sizeof(client->addr));
+	client->bytes = 0;
+	client->errors = 0;
+	client->starttime = time(NULL);
+
 	ev_io_init(&client->io, (void *)client_read, fd, EV_READ);
 	ev_io_start(&client->io);
 }
@@ -145,10 +149,14 @@ client_write(struct client *c, const char *buf, size_t len)
 				continue;
 
 			wrlog(L_DEBUG, "Client %s send error: %s", c->addr, strerror(errno)); // TODO add client address
+			c->errors++;
 			return r;
 		}
-		if (r != len)
+		c->bytes += r;
+		if (r != len) {
 			wrlog(L_DEBUG, "Client %s short write: %zi bytes lost", c->addr, len - r);
+			c->errors++;
+		}
 		return r;
 	}
 	return -1;
@@ -326,6 +334,7 @@ channel_close(struct channel *chan)
 	chan->realurl = NULL;
 	chan->rb = NULL;
 	chan->state = CH_STOP;
+	chan->starttime = time(NULL);
 	wrlog(L_INFO, "close channel %d", chan->no);
 }
 
@@ -399,6 +408,7 @@ channel_cb(ev_io *w, int revents)
 				if (chan->realurl) free(chan->realurl);
 				chan->realurl = strdup(red_addr);
 				chan->state = CH_CONNECT;
+				chan->errors = 0;
 				ev_io_init(&chan->io, channel_cb, fd, EV_READ | EV_WRITE);
 				ev_io_start(&chan->io);
 				free(red_addr);
@@ -411,9 +421,11 @@ err:
 			}
 			rb_reset(chan->rb);
 			chan->state = CH_READ;
-			chan->lastdata = chan->lastclient = time(NULL);
+			chan->starttime = chan->lastdata = chan->lastclient = time(NULL);
+			chan->bytes = 0;
 			wrlog(L_INFO,"connect channel %d", chan->no);
 		}
+		chan->bytes += r;
 		if( ! LIST_EMPTY(&chan->clients) ) {
 			chan->lastclient = time(NULL);
 			LIST_FOREACH_SAFE(client, &chan->clients, link, tmp) {
@@ -452,6 +464,8 @@ channel_connect(struct channel *chan)
 		return;
 	chan->rb = rb_new(chan->rbsize);
 	chan->state = CH_CONNECT;
+	chan->bytes = 0;
+	chan->errors = 0;
 
 	ev_io_init(&chan->io, channel_cb, fd, EV_READ | EV_WRITE);
 	ev_io_start(&chan->io);

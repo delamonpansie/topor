@@ -57,8 +57,11 @@ struct channel {
 	chanstate state;
 	struct ringbuf *rb;
 	size_t rbsize;
+	time_t starttime;
 	time_t lastclient;
 	time_t lastdata;
+	size_t bytes;
+	int errors;
 	LIST_HEAD(, client) clients;
 	SLIST_ENTRY(channel) link;
 };
@@ -69,6 +72,9 @@ struct client {
 	struct channel *channel;
 	char rbuf[256];
 	int rbytes, rcapa;
+	time_t starttime;
+	size_t bytes;
+	int errors;
 	LIST_ENTRY(client) link;
 };
 

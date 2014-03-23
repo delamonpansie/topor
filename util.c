@@ -292,3 +292,49 @@ get_peerip(int fd)
 
     return "Unknown";
 }
+
+const char *
+format_time(int interval)
+{
+	static char s[16];
+	int min = interval / 60;
+	int sec = interval % 60;
+	if(min == 0) {
+		sprintf(s, "%ds", sec);
+		return s;
+	}
+
+	if(min < 60) {
+		sprintf(s, "%dm %02ds", min, sec);
+		return s;
+	}
+
+	int h = min / 60;
+	min %= 60;
+
+	sprintf(s, "%dh %02dm %02ds", h, min, sec);
+	return s;
+}
+
+const char *
+format_traf(unsigned long bytes)
+{
+	static char s[16];
+
+	if(bytes < 2 * 1048576L) {
+		bytes /= 1024;
+		sprintf(s, "%luKb", bytes);
+		return s;
+	}
+
+	if(bytes < 2048 * 1048576L) {
+		bytes /= 1048576;
+		sprintf(s, "%luMb", bytes);
+		return s;
+	}
+
+	bytes /= 1073741824;
+	sprintf(s, "%luGb", bytes);
+	return s;
+}
+

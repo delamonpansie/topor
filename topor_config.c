@@ -6,6 +6,7 @@ extern SLIST_HEAD(, channel) channels;
 extern struct prog_opt topor_opt;
 extern struct channel *
 channel_init(int cno, const char *url, size_t bufsize);
+void channel_connect(struct channel *chan);
 
 static __inline__ int
 is_space(char c)
@@ -71,6 +72,7 @@ parse_config(FILE *fd)
 	int r, i=0, cno=1;
 	size_t bufsize;
 	char *churl;
+	struct channel *ch;
 	while(!feof(fd)) {
 		fgets(buf, sizeof(buf)-1, fd);
 		++i;
@@ -81,7 +83,9 @@ parse_config(FILE *fd)
 			fprintf(stderr,"No channel url on line %d\n",i);
 			continue;
 		}
-		if(channel_init(cno, churl, bufsize) == NULL) return 0; //FIXME
+		ch = channel_init(cno, churl, bufsize);
+		if(ch == NULL) return 0; //FIXME
+		if(topor_opt.is_immediate) channel_connect(ch);
 		cno++;
 	}
 	return 1;

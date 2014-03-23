@@ -15,12 +15,10 @@ typedef u_short flag_t;
     #error f_TRUE or f_FALSE already defined
 #endif
 
-
-static const ssize_t SOCKBUF_LEN = (1024 * 1024);
-
 /* options */
 struct prog_opt {
 	flag_t		is_foreground;
+	flag_t		is_immediate;
 	char		listen_addr[IPADDR_STR_SIZE];
 	int		listen_port;
 	int		chkeepalive;

@@ -32,6 +32,7 @@ init_opt( struct prog_opt* so )
 	int rc = 0;
 	assert( so );
 	so->is_foreground = 0;
+	so->is_immediate = 0;
 	so->listen_addr[0] = 0;
 	so->listen_port = 8888;
 	so->chtimeout = 20,
@@ -58,7 +59,7 @@ void
 usage( const char* app, FILE* fp )
 {
 	(void) fprintf (fp, "usage: %s [-f] [-v level] [-b listenaddr] [-p port] "
-		"[-t timeout] [-k keepalive] "
+		"[-t timeout] [-k keepalive] [-r] "
 		"[-c configfile] [-l logfile] [-P pidfile]\n"
 		, app );
 	(void) fprintf(fp,
@@ -68,6 +69,7 @@ usage( const char* app, FILE* fp )
 		"\t-p : port to listen on\n"
 		"\t-t : timeout on channel data, sec [default = %d]\n"
 		"\t-k : timeout on channel data, sec [default = %d]\n"
+		"\t-r : run channels stream on start\n"
 		"\t-l : log file name\n"
 		"\t-c : config file name\n"
 		"\t-P : pid file name\n"
@@ -85,7 +87,7 @@ int
 get_opt(int argc, char* const argv[])
 {
 	int rc = 0, ch = 0;
-	static const char OPTMASK[] = "fv:b:l:p:t:k:c:P:";
+	static const char OPTMASK[] = "fv:b:l:p:t:k:c:P:r";
 
 	rc = init_opt( &topor_opt );
 	while( (0 == rc) && (-1 != (ch = getopt(argc, argv, OPTMASK))) ) {
@@ -120,6 +122,11 @@ get_opt(int argc, char* const argv[])
 			case 'f': topor_opt.is_foreground = f_TRUE;
 				  topor_opt.loglevel = L_DEBUG;
 				  break;
+
+			case 'r': topor_opt.is_immediate = f_TRUE;
+				  topor_opt.chkeepalive = 0;
+				  break;
+
 			case 'b':
 				  rc = get_ipaddr( optarg, topor_opt.listen_addr, sizeof(topor_opt.listen_addr) );
 				  if( 0 != rc ) {
