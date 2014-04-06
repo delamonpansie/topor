@@ -20,6 +20,7 @@
 #include "ringbuffer.h"
 #include "topor_opt.h"
 #include "topor_config.h"
+#include "topor_stat.h"
 #include "util.h"
 
 /* application error codes */

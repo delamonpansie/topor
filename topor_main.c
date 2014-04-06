@@ -148,7 +148,7 @@ client_write(struct client *c, const char *buf, size_t len)
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
 
-			wrlog(L_DEBUG, "Client %s send error: %s", c->addr, strerror(errno)); // TODO add client address
+			wrlog(L_DEBUG, "Client %s send error: %s", c->addr, strerror(errno));
 			c->errors++;
 			return r;
 		}
@@ -165,20 +165,22 @@ client_write(struct client *c, const char *buf, size_t len)
 int
 client_parse_get(struct client *c)
 {
-	int ret = -1;
+	int ret = 0;
 	char *url;
 	if (sscanf(c->rbuf, "GET %as HTTP/1.1", &url) != 1)
 		return -1;
 
 	char *p = strrchr(url, '/');
-	if (p)
+	if(strcmp(p+1, "stat") == 0) 
+		ret = -1;
+	else if (p)
 		ret = atoi(p + 1);
-
 	free(url);
 	return ret;
 }
 
 const char *client_hdr = "HTTP/1.1 200 OK\r\nContent-Type:application/octet-stream\r\n\r\n";
+const char *notfound_hdr = "HTTP/1.1 404 Not found\r\n";
 void
 client_read(ev_io *w, int revents)
 {
@@ -189,7 +191,7 @@ client_read(ev_io *w, int revents)
 		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
 			return;
 
-		wrlog(L_ERROR, "Client %s receive error: %s", c->addr, strerror(errno)); // TODO add client address
+		wrlog(L_ERROR, "Client %s receive error: %s", c->addr, strerror(errno));
 		client_close(c);
 		return;
 	}
@@ -209,8 +211,14 @@ client_read(ev_io *w, int revents)
 	*lf = 0;
 
 	int cno = client_parse_get(c);
-	if (cno < 0) {
+	if (cno == 0) {
 		wrlog(L_WARNING, "Can't parse request from %s", c->addr);
+		client_write(c, notfound_hdr, strlen(notfound_hdr));
+		goto close;
+	}
+	if(cno == -1 ) {
+		// write stat
+		write_stat(c->io.fd);
 		goto close;
 	}
 
@@ -422,7 +430,6 @@ err:
 			rb_reset(chan->rb);
 			chan->state = CH_READ;
 			chan->starttime = chan->lastdata = chan->lastclient = time(NULL);
-			chan->bytes = 0;
 			wrlog(L_INFO,"connect channel %d", chan->no);
 		}
 		chan->bytes += r;
@@ -464,7 +471,6 @@ channel_connect(struct channel *chan)
 		return;
 	chan->rb = rb_new(chan->rbsize);
 	chan->state = CH_CONNECT;
-	chan->bytes = 0;
 	chan->errors = 0;
 
 	ev_io_init(&chan->io, channel_cb, fd, EV_READ | EV_WRITE);
@@ -481,8 +487,10 @@ channel_init(int cno, const char *url, size_t bufsize)
 	chan->url = strdup(url);
 	chan->realurl = NULL;
 	chan->rbsize = 512*1024;
+	chan->bytes = 0;
 	if(bufsize) chan->rbsize = bufsize * 1024;
 	chan->state = CH_STOP;
+	wrlog(L_DEBUG, "Add channel %d source %s bufsize %zu", cno, url, chan->rbsize);
 	SLIST_INSERT_HEAD(&channels, chan, link);
 	return chan;
 }

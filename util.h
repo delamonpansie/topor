@@ -26,6 +26,8 @@ int make_pidfile( const char* fpath, pid_t pid );
 int wrlog( loglevel level, const char *format, ...);
 void error_log( int err, const char* format, ... );
 const char * get_peerip(int fd);
+const char * format_time(int interval);
+const char * format_traf(unsigned long bytes);
 
 #ifdef __cplusplus
 }

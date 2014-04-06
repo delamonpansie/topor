@@ -74,7 +74,8 @@ parse_config(FILE *fd)
 	char *churl;
 	struct channel *ch;
 	while(!feof(fd)) {
-		fgets(buf, sizeof(buf)-1, fd);
+		if(fgets(buf, sizeof(buf)-1, fd) == NULL) 
+			break;
 		++i;
 		bufsize = 0;
 		r = parseline(buf, &cno, &churl, &bufsize);
