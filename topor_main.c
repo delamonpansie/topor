@@ -449,7 +449,20 @@ err:
 		       		purl = parse_url(chan->realurl);
 			else
 		       		purl = parse_url(chan->url);
-			snprintf(buf, sizeof(buf) - 1, "GET /%s HTTP/1.1\r\nHost: %s\r\n\r\n", purl->path, purl->host);
+			if(purl->path == NULL)
+				purl->path = "";
+			int chars = snprintf(buf, sizeof(buf) - 1, "GET /%s", purl->path);
+			char *p = buf + chars;
+			if(purl->query != NULL) {
+				chars += snprintf(p, sizeof(buf) - chars - 1, "?%s", purl->query);
+				p = buf + chars;
+			}
+			snprintf(p, sizeof(buf) - chars - 1, " HTTP/1.1\r\nHost: %s\r\n"
+					"User-Agent: VLC/2.0.8 LibVLC/2.0.8\r\n"
+					"Range: bytes=0-\r\n"
+					"Connection: close\r\n"
+					"\r\n"
+					, purl->host);
 			if (send(w->fd, buf, strlen(buf), MSG_NOSIGNAL) != strlen(buf)) {
 				wrlog(L_ERROR, "Channel send request error: %s", strerror(errno));
 				return;
