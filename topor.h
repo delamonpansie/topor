@@ -50,18 +50,25 @@ typedef enum {
 	CH_READ
 } chanstate;
 
+typedef enum {
+    STRM_PLAIN,
+    STRM_CHUNKED
+} streamtype;
+
 struct channel {
 	ev_io io;
 	int no;
 	char *url;
 	char *realurl;
 	chanstate state;
+    streamtype type;
 	struct ringbuf *rb;
 	size_t rbsize;
 	time_t starttime;
 	time_t lastclient;
 	time_t lastdata;
 	size_t bytes;
+    size_t chunkleft;
 	int errors;
 	LIST_HEAD(, client) clients;
 	SLIST_ENTRY(channel) link;

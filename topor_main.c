@@ -389,19 +389,19 @@ channel_cb(ev_io *w, int revents)
 			char *data = chan->rb->buff;
 			char *lf = memmem(data, rb_size(chan->rb), "\r\n\r\n", 4);
 			if (!lf) return;
-			lf[4] = '\0';
+			lf[2] = '\0';
 
-			char *location = strstr(data, "Location: ");
-			if (location) {
-				char *crlf = strstr(location, "\r\n");
+			char *header = strstr(data, "Location: ");
+			if (header) {
+				char *crlf = strstr(header, "\r\n");
 				if (!crlf)
 					goto err;
-				*crlf = 0;
+				*crlf = '\0';
 
-				wrlog(L_INFO, "Redirect: %s", location);
+				wrlog(L_INFO, "Redirect: %s", header);
 
 				char *red_addr = NULL;
-				if (sscanf(location, "Location: %as", &red_addr) != 1)
+				if (sscanf(header, "Location: %as", &red_addr) != 1)
 					goto err;
 
 				ev_io_stop(&chan->io);
@@ -427,7 +427,20 @@ err:
 				chan->state = CH_STOP;
 				return;
 			}
-			rb_reset(chan->rb);
+
+			header = strstr(data, "Transfer-Encoding: ");
+			if (header) {
+				char *crlf = strstr(header, "\r\n");
+				if (!crlf)
+					goto err;
+				*crlf = '\0';
+				if (strncmp(header,"chunked",7) == 0) {
+					chan->type = STRM_CHUNKED;
+					chan->chunkleft = 0;
+				}
+			}
+			rb_shift(chan->rb, buf, lf+4);
+//			rb_reset(chan->rb);
 			chan->state = CH_READ;
 			chan->starttime = chan->lastdata = chan->lastclient = time(NULL);
 			wrlog(L_INFO,"connect channel %d", chan->no);
@@ -503,6 +516,8 @@ channel_init(int cno, const char *url, size_t bufsize)
 	chan->bytes = 0;
 	if(bufsize) chan->rbsize = bufsize * 1024;
 	chan->state = CH_STOP;
+	chan->type = STRM_PLAIN;
+	chan->chunkleft = 0;
 	wrlog(L_DEBUG, "Add channel %d source %s bufsize %zu", cno, url, chan->rbsize);
 	SLIST_INSERT_HEAD(&channels, chan, link);
 	return chan;
@@ -514,9 +529,15 @@ timer_cb(struct ev_timer *w, int revents)
 	time_t t = time(NULL);
 	struct channel *chan;
 	SLIST_FOREACH(chan, &channels, link) {
+		if (chan->state == CH_STOP)
+			continue;
 		if (chan->state == CH_READ) {
-			if (	(topor_opt.chtimeout > 0 && t-chan->lastdata > topor_opt.chtimeout) ||
+			if ( (topor_opt.chtimeout > 0 && t-chan->lastdata > topor_opt.chtimeout) ||
 				(topor_opt.chkeepalive > 0 && t-chan->lastclient > topor_opt.chkeepalive) )
+				channel_close(chan);
+		}
+		else {
+			if ( t-chan->lastdata > topor_opt.chtimeout )
 				channel_close(chan);
 		}
 	}
@@ -528,7 +549,7 @@ int main(int argc, char* const argv[])
 	struct sockaddr_in sin, *ssin;
 
 	ev_default_loop(ev_recommended_backends() | EVFLAG_SIGNALFD);
-	char *evb = NULL;
+/*	char *evb = NULL;
 	switch(ev_backend()) {
 		case    EVBACKEND_SELECT:   evb = "select"; break;
 		case    EVBACKEND_POLL:     evb = "poll"; break;
@@ -540,6 +561,7 @@ int main(int argc, char* const argv[])
 	}
 	printf("ev_loop initialized using '%s' backend, libev version is %d.%d\n",
 			evb, ev_version_major(), ev_version_minor());
+*/
 
 	rc = get_opt(argc, argv);
 	if (rc) {

@@ -91,3 +91,11 @@ rb_iovec(struct ringbuf *rb, struct iovec *iov, size_t count)
 		return 1;
 	}
 }
+
+void
+rb_shift(struct ringbuf *rb, char *to, char *from)
+{
+	size_t count = rb->tail - from;
+	memcpy(to,from,count);
+	rb->tail -= from - to;
+}
