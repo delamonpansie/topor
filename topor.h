@@ -18,6 +18,7 @@
 #include "topor_ev.h"
 #include "queue.h"
 #include "ringbuffer.h"
+#include "printbuf.h"
 #include "topor_opt.h"
 #include "topor_config.h"
 #include "topor_stat.h"

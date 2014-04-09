@@ -109,9 +109,10 @@ server_accept(ev_io *w, int revents)
 	}
 
 	int len;
-	for (len = 1 << 22; len > 0; len -= 1 << 18)
-		if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &len, sizeof(len)) == 0)
+	for (len = 1 << 20; len > 0; len -= 1 << 18)
+		if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &len, sizeof(len)) == 0) {
 			break;
+		}
 
 
 	extern void client_read(ev_io *w, int revents);
@@ -154,7 +155,7 @@ client_write(struct client *c, const char *buf, size_t len)
 		}
 		c->bytes += r;
 		if (r != len) {
-			wrlog(L_DEBUG, "Client %s short write: %zi bytes lost", c->addr, len - r);
+			wrlog(L_DEBUG, "Client %s short write: %zi bytes from %zi lost", c->addr, len - r, len);
 			c->errors++;
 		}
 		return r;
@@ -236,13 +237,15 @@ client_read(ev_io *w, int revents)
 		switch (chan->state) {
 		case CH_READ: {
 			struct iovec iov[2];
-			size_t i, n = rb_iovec(chan->rb, iov, 2);
+			size_t n = rb_iovec(chan->rb, iov, 2);
+			int i;
 			for (i = 0; i < n; i++) {
 				ssize_t r = client_write(c, iov[i].iov_base, iov[i].iov_len);
 				if (r < 0)
 					goto close;
-				if (r != iov[i].iov_len)
+				if (r != iov[i].iov_len) {
 					break;
+				}
 			}
 			LIST_INSERT_HEAD(&chan->clients, c, link);
 			return;
@@ -360,12 +363,16 @@ channel_cb(ev_io *w, int revents)
 		wrlog(L_ANNOY, "channel %d read %zi bytes", chan->no, r);
 
 		if (r < 0) {
-			wrlog(L_ERROR, "Channel receive error: %s", strerror(errno));
-			abort(); // FIXME
+			wrlog(L_ERROR, "Channel %d receive error: %s", chan->no, strerror(errno));
+			chan->errors++;
+			if (chan->errors > 10)
+				channel_close(chan);
+			return;
 		}
 
 		if (0 == r) {
 			/* eof */
+			wrlog(L_WARNING, "Channel %d receive eof", chan->no);
 			channel_close(chan);
 			return;
 		}
@@ -498,6 +505,7 @@ channel_connect(struct channel *chan)
 	chan->rb = rb_new(chan->rbsize);
 	chan->state = CH_CONNECT;
 	chan->errors = 0;
+	chan->lastdata = time(NULL);
 
 	ev_io_init(&chan->io, channel_cb, fd, EV_READ | EV_WRITE);
 	ev_io_start(&chan->io);
