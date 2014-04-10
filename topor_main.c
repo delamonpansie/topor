@@ -150,8 +150,8 @@ client_write(struct client *c, const char *buf, size_t len)
 				continue;
 
 			if  (errno == EAGAIN || errno == EWOULDBLOCK) {
-				wrlog(L_DEBUG, "Client %s short write: %zi bytes from %zi lost",
-				      c->addr, len - bytes, len);
+				wrlog(L_DEBUG, "Client %s short write: %zi bytes from %zi lost, %s",
+				      c->addr, len - r, len, strerror(errno));
 				c->errors++;
 				break;
 			}
@@ -160,6 +160,7 @@ client_write(struct client *c, const char *buf, size_t len)
 			c->errors++;
 			return -1;
 		}
+		bytes += r;
 		c->bytes += r;
 		buf += r;
 		len -= r;
