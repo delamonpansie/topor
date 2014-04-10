@@ -141,26 +141,30 @@ client_close(struct client *c)
 ssize_t
 client_write(struct client *c, const char *buf, size_t len)
 {
-	int i;
-	for (i = 0; i < 64; i++) {
+	size_t bytes = 0;
+	while (len > 0) {
 		errno = 0;
 		ssize_t r = send(c->io.fd, buf, len, MSG_NOSIGNAL);
 		if (r < 0) {
-			if (errno == EINTR || errno == EAGAIN)
+			if (errno == EINTR)
 				continue;
+
+			if  (errno == EAGAIN || errno == EWOULDBLOCK) {
+				wrlog(L_DEBUG, "Client %s short write: %zi bytes from %zi lost",
+				      c->addr, len - bytes, len);
+				c->errors++;
+				break;
+			}
 
 			wrlog(L_DEBUG, "Client %s send error: %s", c->addr, strerror(errno));
 			c->errors++;
-			return r;
+			return -1;
 		}
 		c->bytes += r;
-		if (r != len) {
-			wrlog(L_DEBUG, "Client %s short write: %zi bytes from %zi lost", c->addr, len - r, len);
-			c->errors++;
-		}
-		return r;
+		buf += r;
+		len -= r;
 	}
-	return -1;
+	return bytes;
 }
 
 int
