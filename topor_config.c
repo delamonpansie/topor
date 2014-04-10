@@ -69,7 +69,7 @@ int
 parse_config(FILE *fd)
 {
 	char buf[1025];
-	int r, i=0, cno=1;
+	int r, i=0, cno=1, rc = 0;
 	size_t bufsize;
 	char *churl;
 	struct channel *ch;
@@ -82,12 +82,17 @@ parse_config(FILE *fd)
 		if(0 == r) continue;
 		if(1 == r) {
 			fprintf(stderr,"No channel url on line %d\n",i);
+			rc = 1;
 			continue;
 		}
 		ch = channel_init(cno, churl, bufsize);
-		if(ch == NULL) return 0; //FIXME
+		if(ch == NULL) {
+			fprintf(stderr,"cannot init channel:%d url:%s\n", cno, churl);
+			rc = 1;
+			continue;
+		}
 		if(topor_opt.is_immediate) channel_connect(ch);
 		cno++;
 	}
-	return 1;
+	return rc;
 }
