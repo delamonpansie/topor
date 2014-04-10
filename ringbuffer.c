@@ -18,7 +18,7 @@ rb_new(size_t capacity)
 		return NULL;
 
 	rb->capacity	= capacity;
-	rb->tail	= rb->buff;
+	rb->tail	= 0;
 	rb->over	= 0;
 	return rb;
 };
@@ -27,37 +27,43 @@ void
 rb_reset(struct ringbuf *rb)
 {
 	assert(rb != NULL);
-	rb->tail = rb->buff;
+	rb->tail = 0;
 	rb->over = 0;
 }
 
 size_t
 rb_size(struct ringbuf *rb)
 {
-	return rb->tail - rb->buff;
+	return rb->tail;
+}
+
+char *
+rb_tailptr(struct ringbuf *rb)
+{
+	return rb->buff + rb->tail;
 }
 
 void
 rb_append(struct ringbuf *rb, const void *data, size_t count)
 {
-	ssize_t free = rb->capacity - rb_size(rb);
+	ssize_t free = rb->capacity - rb->tail;
 	if (count > free) {
 		rb->over = 1;
 
-		memcpy(rb->tail, data, free);
-		rb->tail = rb->buff;
+		memcpy(rb->buff + rb->tail, data, free);
+		rb->tail = 0;
 		data += free;
 		count -= free;
 	}
 
-	memcpy(rb->tail, data, count);
+	memcpy(rb->buff + rb->tail, data, count);
 }
 
 size_t
 rb_recv(int fd, struct ringbuf *rb, int flags)
 {
-	size_t free = rb->capacity - rb_size(rb);
-	ssize_t r = recv(fd, rb->tail, free, flags);
+	size_t free = rb->capacity - rb->tail;
+	ssize_t r = recv(fd, rb->buff + rb->tail, free, flags);
 
 	if (r <= 0)
 		return r;
@@ -65,7 +71,7 @@ rb_recv(int fd, struct ringbuf *rb, int flags)
 	if (r < free) {
 		rb->tail += r;
 	} else {
-		rb->tail = rb->buff;
+		rb->tail = 0;
 		rb->over = 1;
 	}
 
@@ -80,22 +86,23 @@ rb_iovec(struct ringbuf *rb, struct iovec *iov, size_t count)
 	assert(count >= 2);
 
 	if (rb->over) {
-		iov[0].iov_base = rb->tail;
-		iov[0].iov_len = rb->capacity - rb_size(rb);
+		iov[0].iov_base = rb->buff + rb->tail;
+		iov[0].iov_len = rb->capacity - rb->tail;
 		iov[1].iov_base = rb->buff;
-		iov[1].iov_len = rb_size(rb);
+		iov[1].iov_len = rb->tail;
 		return 2;
 	} else {
 		iov[0].iov_base = rb->buff;
-		iov[0].iov_len = rb_size(rb);
+		iov[0].iov_len = rb->tail;
 		return 1;
 	}
 }
 
 void
-rb_shift(struct ringbuf *rb, char *to, char *from)
+rb_shift(struct ringbuf *rb, char *to, size_t len)
 {
-	size_t count = rb->tail - from;
-	memcpy(to,from,count);
-	rb->tail -= from - to;
+	char *from = to + len;
+	size_t count = rb->tail - (to - rb->buff + len);
+	memcpy(to, from, count);
+	rb->tail -= len;
 }
