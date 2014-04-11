@@ -80,22 +80,35 @@ rb_recv(int fd, struct ringbuf *rb, int flags)
 	return r;
 }
 
-size_t
-rb_iovec(struct ringbuf *rb, struct iovec *iov, size_t count)
+void
+rb_iovec(struct ringbuf *rb, struct iovec *iov, ssize_t pos)
 {
-	assert(count >= 2);
-
 	if (rb->over) {
-		iov[0].iov_base = rb->buff + rb->tail;
-		iov[0].iov_len = rb->capacity - rb->tail;
-		iov[1].iov_base = rb->buff;
-		iov[1].iov_len = rb->tail;
-		return 2;
+		if (pos < 0)
+			pos = rb->tail;
+
+		iov->iov_base = rb->buff + pos;
+		if (rb->tail <= pos)
+			iov->iov_len = rb->capacity - pos;
+		else
+			iov->iov_len = rb->tail - pos;
 	} else {
-		iov[0].iov_base = rb->buff;
-		iov[0].iov_len = rb->tail;
-		return 1;
+		if (pos < 0)
+			pos = 0;
+		iov->iov_base = rb->buff + pos;
+		iov->iov_len = rb->tail;
 	}
+}
+
+ssize_t
+rb_calcpos(struct ringbuf *rb, ssize_t pos, ssize_t offset)
+{
+	if (pos < 0)
+		pos = rb->over ? rb->tail : 0;
+	pos += offset;
+	if (pos < rb->capacity)
+		return pos;
+	return 0;
 }
 
 void
@@ -106,3 +119,4 @@ rb_shift(struct ringbuf *rb, char *to, size_t len)
 	memcpy(to, from, count);
 	rb->tail -= len;
 }
+

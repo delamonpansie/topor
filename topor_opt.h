@@ -23,6 +23,7 @@ struct prog_opt {
 	int		listen_port;
 	int		chkeepalive;
 	int		chtimeout;
+	int		clitimeout;
 	char*		logfile;
 	char*		configfile;
 	char*		pidfile;

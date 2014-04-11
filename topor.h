@@ -92,7 +92,7 @@ struct client {
 	size_t bytes;
 	int errors;
 	clistate state;
-	size_t precachepos;
+	ssize_t precachepos;
 	LIST_ENTRY(client) link;
 };
 

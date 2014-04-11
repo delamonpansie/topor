@@ -18,6 +18,7 @@ void rb_append(struct ringbuf *rb, const void *data, size_t count);
 size_t rb_size(struct ringbuf *rb);
 char * rb_tailptr(struct ringbuf *rb);
 size_t rb_recv(int fd, struct ringbuf *rb, int flags);
-size_t rb_iovec(struct ringbuf *rb, struct iovec *iov, size_t count);
+void rb_iovec(struct ringbuf *rb, struct iovec *iov, ssize_t pos);
+ssize_t rb_calcpos(struct ringbuf *rb, ssize_t pos, ssize_t offset);
 void rb_shift(struct ringbuf *rb, char *to, size_t len);
 #endif

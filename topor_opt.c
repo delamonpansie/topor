@@ -37,6 +37,7 @@ init_opt( struct prog_opt* so )
 	so->listen_port = 8888;
 	so->chtimeout = 20,
 	so->chkeepalive = 60,
+	so->clitimeout = 5,
 	so->logfile = so->configfile = so->pidfile = NULL;
 	so->loglevel = L_ERROR;
 	return rc;

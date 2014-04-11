@@ -19,20 +19,28 @@ write_stat(int fd)
 		return;
 	struct channel *chan;
 	time_t curtime = time(NULL);
+	int clinum;
+	struct client *client, *tmp;
 
 	write(fd, HTML_PAGE_HEADER, sizeof(HTML_PAGE_HEADER)-1);	
 
 	SLIST_FOREACH(chan, &channels, link) {
+		clinum = 0;
+		if( ! LIST_EMPTY(&chan->clients) ) {
+			LIST_FOREACH_SAFE(client, &chan->clients, link, tmp) {
+				clinum++;
+			}
+		}
 		if(chan->state == CH_READ) {
 			prbuf_printf(pb,
-				"Channel:%-3d  State:active   Run:%-8s  Load:%-8s  Source:%s\n",
-				chan->no, format_time(curtime - chan->starttime), format_traf(chan->bytes), chan->realurl
+				"Channel:%-3d  State:active   Clients:%-3d Run:%-8s  Load:%-8s  Source:%s\n",
+				chan->no, clinum, format_time(curtime - chan->starttime), format_traf(chan->bytes), chan->realurl
 				);
 		}
 		else {
 			prbuf_printf(pb,
-				"Channel:%-3d  State:inactive Run:%-8s  Load:%-8s  Source:\n",
-				chan->no, "0", format_traf(chan->bytes)
+				"Channel:%-3d  State:inactive Clients:%-3d Run:%-8s  Load:%-8s  Source:\n",
+				chan->no, clinum, "0", format_traf(chan->bytes)
 				);
 		}
 		if (prbuf_len(pb) > STATBUFSIZE - 1024) {

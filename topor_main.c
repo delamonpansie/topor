@@ -109,7 +109,7 @@ server_accept(ev_io *w, int revents)
 	}
 
 	int len;
-	for (len = 1 << 20; len > 0; len -= 1 << 18)
+	for (len = 1 << 21; len > 0; len -= 1 << 18)
 		if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &len, sizeof(len)) == 0) {
 			break;
 		}
@@ -123,8 +123,8 @@ server_accept(ev_io *w, int revents)
 	client->starttime = time(NULL);
 	client->state = CLI_REQ;
 
-	void client_cb(ev_io *w, int revents);
-	ev_io_init(&client->io, (void *)client_cb, fd, EV_READ);
+	void client_cbread(ev_io *w, int revents);
+	ev_io_init(&client->io, (void *)client_cbread, fd, EV_READ);
 	ev_io_start(&client->io);
 }
 
@@ -150,14 +150,11 @@ client_write(struct client *c, const char *buf, size_t len)
 			if (errno == EINTR)
 				continue;
 
-			if  (errno == EAGAIN || errno == EWOULDBLOCK) {
-				wrlog(L_DEBUG, "Client %s short write: %zi bytes from %zi lost, %s",
-				      c->addr, len - r, len, strerror(errno));
-				c->errors++;
-				break;
-			}
-
 			wrlog(L_DEBUG, "Client %s send error: %s", c->addr, strerror(errno));
+
+			if  (errno == EAGAIN || errno == EWOULDBLOCK)
+				break;
+
 			c->errors++;
 			return -1;
 		}
@@ -186,108 +183,110 @@ client_parse_get(struct client *c)
 	return ret;
 }
 
+void
+client_cbwrite(ev_io *w, int revents)
+{
+	struct client *c = (struct client *)w;
+	if (c->state == CLI_PRECACHE) {
+		if (c->bytes > c->channel->rb->capacity)
+		       goto close;
+		struct iovec iov;
+		rb_iovec(c->channel->rb, &iov, c->precachepos);
+		ssize_t r = client_write(c, iov.iov_base, iov.iov_len);
+		if (r < 0)
+			goto close;
+		c->precachepos = rb_calcpos(c->channel->rb, c->precachepos, r);
+		if (c->precachepos != rb_size(c->channel->rb))
+			return;
+	}
+	c->state = CLI_DIRECT;
+	ev_io_stop(&c->io);
+	return;
+close:
+	client_close(c);
+}
+
 const char *client_hdr = "HTTP/1.1 200 OK\r\nContent-Type:application/octet-stream\r\n\r\n";
 const char *notfound_hdr = "HTTP/1.1 404 Not found\r\n";
 void
-client_cb(ev_io *w, int revents)
+client_cbread(ev_io *w, int revents)
 {
 	struct client *c = (struct client *)w;
-	if (revents & EV_READ) {
-		if(c->state == CLI_REQ) {
-			int r = recv(w->fd, c->rbuf + c->rbytes, sizeof(c->rbuf) - c->rbytes, 0);
-			if (r < 0) {
-				if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-					return;
-
-				wrlog(L_ERROR, "Client %s receive error: %s", c->addr, strerror(errno));
-				client_close(c);
-				return;
-			}
-
-			c->rbytes += r;
-			char *lf = memmem(c->rbuf, c->rbytes, "\n", 1);
-			if (!lf && c->rbytes < sizeof(c->rbuf))
+	if(c->state == CLI_REQ) {
+		int r = recv(w->fd, c->rbuf + c->rbytes, sizeof(c->rbuf) - c->rbytes, 0);
+		if (r < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
 				return;
 
-			if (!lf) {
-				wrlog(L_WARNING, "Can't parse request from %s", c->addr);
-				goto close;
-			}
+			wrlog(L_ERROR, "Client %s receive error: %s", c->addr, strerror(errno));
+			client_close(c);
+			return;
+		}
 
-			if (lf - 1 > c->rbuf && *(lf - 1) == '\r')
-				lf--;
-			*lf = 0;
+		c->rbytes += r;
+		char *lf = memmem(c->rbuf, c->rbytes, "\n", 1);
+		if (!lf && c->rbytes < sizeof(c->rbuf))
+			return;
 
-			int cno = client_parse_get(c);
-			if (cno == 0) {
-				wrlog(L_WARNING, "Can't parse request from %s", c->addr);
-				client_write(c, notfound_hdr, strlen(notfound_hdr));
-				goto close;
-			}
-			if(cno == -1 ) {
-				// write stat
-				write_stat(c->io.fd);
-				goto close;
-			}
+		if (!lf) {
+			wrlog(L_WARNING, "Can't parse request from %s", c->addr);
+			goto close;
+		}
 
-			struct channel *tc, *chan = NULL;
-			SLIST_FOREACH(tc, &channels, link) {
-				if (tc->no == cno) {
-					chan = tc;
-					break;
-				}
-			}
-			if (NULL == chan) {
-				wrlog(L_WARNING, "Bad channel number %d", cno);
-				client_write(c, notfound_hdr, strlen(notfound_hdr));
-				goto close;
-			}
-			c->channel = chan;
+		if (lf - 1 > c->rbuf && *(lf - 1) == '\r')
+			lf--;
+		*lf = 0;
 
-			if (client_write(c, client_hdr, strlen(client_hdr)) != strlen(client_hdr)) {
-				wrlog(L_WARNING, "Can't write header to %s", c->addr);
-				goto close;
+		int cno = client_parse_get(c);
+		if (cno == 0) {
+			wrlog(L_WARNING, "Can't parse request from %s", c->addr);
+			client_write(c, notfound_hdr, strlen(notfound_hdr));
+			goto close;
+		}
+		if(cno == -1 ) {
+			// write stat
+			write_stat(c->io.fd);
+			goto close;
+		}
+
+		struct channel *tc, *chan = NULL;
+		SLIST_FOREACH(tc, &channels, link) {
+			if (tc->no == cno) {
+				chan = tc;
+				break;
 			}
+		}
+		if (NULL == chan) {
+			wrlog(L_WARNING, "Bad channel number %d", cno);
+			client_write(c, notfound_hdr, strlen(notfound_hdr));
+			goto close;
+		}
+		c->channel = chan;
 
-			switch (chan->state) {
-				case CH_READ:
-					c->state = CLI_PRECACHE;
-					c->precachepos = rb_size(chan->rb);
-					break;
-
-				case CH_STOP:
-					channel_connect(chan);
-
-				default:
-					c->state = CLI_DIRECT;
-			}
-			LIST_INSERT_HEAD(&chan->clients, c, link);
+		if (client_write(c, client_hdr, strlen(client_hdr)) != strlen(client_hdr)) {
+			wrlog(L_WARNING, "Can't write header to %s", c->addr);
+			goto close;
 		}
 
 		ev_io_stop(&c->io);
-		ev_io_init(&c->io, client_cb, w->fd, EV_WRITE);
-		ev_io_start(&c->io);
-		return;
-	}
-	else {
-		if (c->state == CLI_PRECACHE) {
-			struct iovec iov[2];
-			size_t n = rb_iovec(c->channel->rb, iov, 2);
-			int i;
-			for (i = 0; i < n; i++) {
-				ssize_t r = client_write(c, iov[i].iov_base, iov[i].iov_len);
-				if (r < 0)
-					goto close;
-				if (r != iov[i].iov_len) {
-					break;
-				}
-			}
-		}
-		c->state = CLI_DIRECT;
-		ev_io_stop(&c->io);
-		return;
-	}
 
+		switch (chan->state) {
+			case CH_READ:
+				c->state = CLI_PRECACHE;
+				c->precachepos = -1;
+				ev_io_init(&c->io, client_cbwrite, w->fd, EV_WRITE);
+				ev_io_start(&c->io);
+				break;
+
+			case CH_STOP:
+				channel_connect(chan);
+
+			default:
+				c->state = CLI_DIRECT;
+		}
+		LIST_INSERT_HEAD(&chan->clients, c, link);
+	}
+	return;
 close:
 	client_close(c);
 }
