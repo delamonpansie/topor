@@ -28,6 +28,7 @@ void error_log( int err, const char* format, ... );
 const char * get_peerip(int fd);
 const char * format_time(int interval);
 const char * format_traf(unsigned long bytes);
+void printbuf(unsigned char *p, size_t len);
 
 #ifdef __cplusplus
 }

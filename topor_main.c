@@ -57,13 +57,13 @@ server_socket(struct sockaddr_in *sin)
 		close(fd);
 		return -1;
 	}
-
+/*
 	if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) == -1) {
 		error_log(errno, "Server tcp_nodelay set error");
 		close(fd);
 		return -1;
 	}
-
+*/
 	if (ioctl(fd, FIONBIO, &nonblock) < 0) {
 		error_log(errno, "Server socket set nonblock error");
 		close(fd);
@@ -380,13 +380,43 @@ channel_close(struct channel *chan)
 void
 channel_cb(ev_io *w, int revents)
 {
-	char buf[1024] = {0};
+	char wbuf[1024] = {0};
+	char *buf;
+	ssize_t r, maxb;
 	struct channel *chan = (struct channel *)w;
 	struct client *client, *tmp;
 
 	if (revents & EV_READ) {
-		char *buf = rb_tailptr(chan->rb);
-		ssize_t r = rb_recv(w->fd, chan->rb, 0);
+		buf = rb_tailptr(chan->rb);
+
+		if (chan->state == CH_READ && chan->type == STRM_CHUNKED && chan->chunkleft <= 0) {
+			buf = chan->rbuf + -chan->chunkleft;
+			r = recv(w->fd, buf, 16, 0);
+			buf[r] = '\0';
+			chan->chunkleft -= r;
+			if (*buf == '\r') {
+				buf += 2;
+				r -= 2;
+			}
+			char *lf = memmem(buf, r, "\r\n", 2);
+			if (NULL == lf) {
+				if (chan->chunkleft > -32)
+					return;
+				wrlog(L_ERROR, "channel %d chunk syncro lost", chan->no);
+				goto err;
+			}
+			lf[0] = '\0';
+			sscanf(buf, "%x", &chan->chunkleft);
+			r -= lf - buf + 2;
+			buf = lf + 2;
+			rb_append(chan->rb, lf+2, r);
+		}
+		else {
+			maxb = 0;
+			if (chan->type == STRM_CHUNKED) 
+				maxb = chan->chunkleft;
+			r = rb_recv(w->fd, chan->rb, 0, maxb);
+		}
 
 		wrlog(L_ANNOY, "channel %d read %zi bytes", chan->no, r);
 
@@ -406,7 +436,7 @@ channel_cb(ev_io *w, int revents)
 		}
 		chan->lastdata = time(NULL);
 
-		if(chan->state == CH_SENDREQ) {
+		if (chan->state == CH_SENDREQ) {
 			int err;
 			socklen_t len = sizeof(err);
 			getsockopt(w->fd, SOL_SOCKET, SO_ERROR, &err, &len);
@@ -419,7 +449,7 @@ channel_cb(ev_io *w, int revents)
 				chan->state = CH_READHEADER;
 			}
 		}
-		if(chan->state == CH_READHEADER) {
+		if (chan->state == CH_READHEADER) {
 			assert(chan->rb->over == 0);
 			char *data = chan->rb->buff;
 			char *lf = memmem(data, rb_size(chan->rb), "\r\n\r\n", 4);
@@ -457,30 +487,28 @@ channel_cb(ev_io *w, int revents)
 				free(red_addr);
 				return;
 err:
-				ev_io_stop(&chan->io);
-				close(w->fd);
-				chan->state = CH_STOP;
+				if (red_addr)
+					free(red_addr);
+				channel_close(chan);
 				return;
 			}
-
-			header = strstr(data, "Transfer-Encoding: ");
+			header = strstr(data, "Transfer-Encoding: chunked");
 			if (header) {
-				char *crlf = strstr(header, "\r\n");
-				if (!crlf)
-					goto err;
-				*crlf = '\0';
-				if (strncmp(header,"chunked",7) == 0) {
-					chan->type = STRM_CHUNKED;
-					chan->chunkleft = 0;
-				}
+				chan->type = STRM_CHUNKED;
+				chan->chunkleft = 0;
 			}
 			rb_shift(chan->rb, buf, lf - buf + 4);
 			chan->state = CH_READ;
 			chan->starttime = chan->lastdata = chan->lastclient = time(NULL);
 			wrlog(L_INFO,"connect channel %d", chan->no);
+			return;
 		}
 		chan->bytes += r;
-		if( ! LIST_EMPTY(&chan->clients) ) {
+		if (chan->type == STRM_CHUNKED) {
+			chan->chunkleft -= r;
+//			printf("Get %zi bytes, chank left %d\n", r, chan->chunkleft);
+		}
+		if ( ! LIST_EMPTY(&chan->clients) ) {
 			chan->lastclient = time(NULL);
 			LIST_FOREACH_SAFE(client, &chan->clients, link, tmp) {
 				ssize_t cr = client_write(client, buf, r);
@@ -490,27 +518,27 @@ err:
 		}
 	}
 	else if (revents & EV_WRITE) {
-		if(chan->state == CH_CONNECT) {
+		if (chan->state == CH_CONNECT) {
 			struct parsed_url *purl;
 			if (chan->realurl)
 		       		purl = parse_url(chan->realurl);
 			else
 		       		purl = parse_url(chan->url);
-			if(purl->path == NULL)
+			if (purl->path == NULL)
 				purl->path = "";
-			int chars = snprintf(buf, sizeof(buf) - 1, "GET /%s", purl->path);
-			char *p = buf + chars;
-			if(purl->query != NULL) {
-				chars += snprintf(p, sizeof(buf) - chars - 1, "?%s", purl->query);
-				p = buf + chars;
+			int chars = snprintf(wbuf, sizeof(wbuf) - 1, "GET /%s", purl->path);
+			char *p = wbuf + chars;
+			if (purl->query != NULL) {
+				chars += snprintf(p, sizeof(wbuf) - chars - 1, "?%s", purl->query);
+				p = wbuf + chars;
 			}
-			snprintf(p, sizeof(buf) - chars - 1, " HTTP/1.1\r\nHost: %s\r\n"
+			snprintf(p, sizeof(wbuf) - chars - 1, " HTTP/1.1\r\nHost: %s\r\n"
 					"User-Agent: VLC/2.0.8 LibVLC/2.0.8\r\n"
 					"Range: bytes=0-\r\n"
 					"Connection: close\r\n"
 					"\r\n"
 					, purl->host);
-			if (send(w->fd, buf, strlen(buf), MSG_NOSIGNAL) != strlen(buf)) {
+			if (send(w->fd, wbuf, strlen(wbuf), MSG_NOSIGNAL) != strlen(wbuf)) {
 				wrlog(L_ERROR, "Channel send request error: %s", strerror(errno));
 				return;
 			}

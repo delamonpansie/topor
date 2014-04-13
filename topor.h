@@ -71,12 +71,13 @@ struct channel {
 	chanstate state;
 	streamtype type;
 	struct ringbuf *rb;
+	char rbuf[64];
 	size_t rbsize;
 	time_t starttime;
 	time_t lastclient;
 	time_t lastdata;
 	size_t bytes;
-	size_t chunkleft;
+	int chunkleft;
 	int errors;
 	LIST_HEAD(, client) clients;
 	SLIST_ENTRY(channel) link;

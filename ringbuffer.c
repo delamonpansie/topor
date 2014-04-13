@@ -60,9 +60,11 @@ rb_append(struct ringbuf *rb, const void *data, size_t count)
 }
 
 size_t
-rb_recv(int fd, struct ringbuf *rb, int flags)
+rb_recv(int fd, struct ringbuf *rb, int flags, size_t maxb)
 {
 	size_t free = rb->capacity - rb->tail;
+	if (maxb > 0 && maxb < free)
+		free = maxb;
 	ssize_t r = recv(fd, rb->buff + rb->tail, free, flags);
 
 	if (r <= 0)
@@ -116,7 +118,8 @@ rb_shift(struct ringbuf *rb, char *to, size_t len)
 {
 	char *from = to + len;
 	size_t count = rb->tail - (to - rb->buff + len);
-	memcpy(to, from, count);
+	if (count != 0)
+		memcpy(to, from, count);
 	rb->tail -= len;
 }
 
