@@ -408,6 +408,8 @@ channel_cb(ev_io *w, int revents)
 			lf[0] = '\0';
 			sscanf(buf, "%x", &chan->chunkleft);
 			r -= lf - buf + 2;
+			if (r == 0)
+				return;
 			buf = lf + 2;
 			rb_append(chan->rb, lf+2, r);
 		}

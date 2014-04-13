@@ -19,8 +19,9 @@ write_stat(int fd)
 		return;
 	struct channel *chan;
 	time_t curtime = time(NULL);
-	int clinum;
 	struct client *client, *tmp;
+	int clinum;
+	char *url;
 
 	write(fd, HTML_PAGE_HEADER, sizeof(HTML_PAGE_HEADER)-1);	
 
@@ -31,10 +32,13 @@ write_stat(int fd)
 				clinum++;
 			}
 		}
-		if(chan->state == CH_READ) {
+		url = chan->url;
+		if (chan->realurl)
+			url = chan->realurl;
+		if (chan->state == CH_READ) {
 			prbuf_printf(pb,
 				"Channel:%-3d  State:active   Clients:%-3d Run:%-8s  Load:%-8s  Source:%s\n",
-				chan->no, clinum, format_time(curtime - chan->starttime), format_traf(chan->bytes), chan->realurl
+				chan->no, clinum, format_time(curtime - chan->starttime), format_traf(chan->bytes), url
 				);
 		}
 		else {
